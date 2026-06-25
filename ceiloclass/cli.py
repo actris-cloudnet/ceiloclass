@@ -110,6 +110,11 @@ def _add_arguments(p: argparse.ArgumentParser) -> None:
         metavar="KM",
         help="Upper limit of the range axis in plots (km)",
     )
+    p.add_argument(
+        "--no-histogram",
+        action="store_true",
+        help="Omit the diagnostic backscatter histogram panel from plots",
+    )
 
 
 def _select_source(
@@ -201,6 +206,7 @@ def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
             beta=ceilo.beta,
             depol=ceilo.depol,
             show=args.show,
+            histogram=not args.no_histogram,
             **plot_kwargs,
         )
         if args.plot:

@@ -34,6 +34,7 @@ def plot_classification(
     depol: npt.NDArray[np.floating] | None = None,
     show: bool = False,
     max_height: float = 12000,
+    histogram: bool = True,
 ) -> None:
     """Plot a target-classification curtain, saving and/or showing it.
 
@@ -45,6 +46,8 @@ def plot_classification(
             e.g. ceilo.depol); useful for eyeballing ice vs liquid.
         show: Display the figure in an interactive window.
         max_height: Upper limit of the range axis (m).
+        histogram: Add the diagnostic backscatter histogram panel (with the
+            cloud/aerosol threshold) when `beta` is given. Set `False` to omit it.
     """
     if not show:
         matplotlib.use("Agg")  # headless: no display needed for saving
@@ -63,7 +66,7 @@ def plot_classification(
     norm = BoundaryNorm(np.arange(-0.5, len(Target) + 0.5, 1), cmap.N)
 
     n_curtain = 1 + (beta is not None) + (depol is not None)
-    show_hist = beta is not None
+    show_hist = beta is not None and histogram
     n_rows = n_curtain + int(show_hist)
     fig = plt.figure(figsize=(12, 3.6 * n_curtain + (3.0 if show_hist else 0.0)))
     gs = fig.add_gridspec(n_rows, 1)
@@ -135,7 +138,7 @@ def plot_classification(
     )
 
     hist_ax = None
-    if beta is not None:
+    if show_hist and beta is not None:
         hist_ax = fig.add_subplot(gs[n_curtain, 0])
         _plot_beta_hist(hist_ax, beta, classification.strong_beta)
 
