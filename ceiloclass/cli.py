@@ -26,7 +26,7 @@ from .download import (
     LidarSource,
     download_source,
     fetch_model,
-    list_lidar_product_sources,
+    list_harmonized_sources,
     list_raw_sources,
 )
 from .plot import plot_classification
@@ -68,15 +68,17 @@ def _add_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "-i",
         "--instrument",
-        choices=sorted(READERS),
-        help="Instrument (raw input). When fetching, optional: restricts the "
-        "search; if several instruments remain you are prompted to pick one",
+        metavar="ID",
+        help="Instrument. For raw input, the reader to use, one of: "
+        f"{', '.join(sorted(READERS))}. When fetching a harmonized product it is "
+        "optional and filters by instrument-id substring (e.g. 'halo', 'pollyxt', "
+        "'cl61'); if several instruments remain you are prompted to pick one",
     )
     p.add_argument(
         "--harmonized",
         action="store_true",
-        help="Input is a Cloudnet harmonized lidar product (calibrated, screened) "
-        "rather than raw instrument data",
+        help="Use a Cloudnet harmonized backscatter product (ceilometers, PollyXT, "
+        "doppler-lidars) instead of raw instrument data",
     )
     p.add_argument(
         "-m",
@@ -154,16 +156,19 @@ def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         # Local files: we can't introspect them, so the reader must be stated.
         if args.harmonized:
             reader = read_lidar
-        elif args.instrument:
+        elif args.instrument in READERS:
             reader = READERS[args.instrument]
-        else:
+        elif args.instrument:
             parser.error(
-                "provide -i/--instrument, or --harmonized for a Cloudnet lidar product"
+                f"unknown raw instrument {args.instrument!r}; "
+                f"choose from: {', '.join(sorted(READERS))}"
             )
+        else:
+            parser.error("provide -i/--instrument, or --harmonized for a product")
         files = list(args.files)
     elif args.site and args.date:
         if args.harmonized:
-            sources = list_lidar_product_sources(args.site, args.date, args.instrument)
+            sources = list_harmonized_sources(args.site, args.date, args.instrument)
         else:
             sources = list_raw_sources(args.site, args.date, args.instrument)
         source = _select_source(sources, parser)

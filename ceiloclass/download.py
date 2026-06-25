@@ -74,32 +74,53 @@ def list_raw_sources(
     return sources
 
 
-def list_lidar_product_sources(
+HARMONIZED_PRODUCTS = ("lidar", "doppler-lidar")
+"""Cloudnet harmonized backscatter products read with `read_lidar`.
+
+`lidar` is ceilometers and PollyXT; `doppler-lidar` is the experimental HALO /
+WindCube backscatter product. Both expose the same `beta`/`beta_raw`.
+"""
+
+
+def list_harmonized_sources(
     site_id: str,
     date: str | datetime.date,
     instrument: str | None = None,
 ) -> list[LidarSource]:
-    """List the harmonized lidar products available at a site and date.
+    """List the harmonized backscatter instruments available at a site and date.
+
+    Searches every product in `HARMONIZED_PRODUCTS`, so a site's ceilometers,
+    PollyXT and doppler-lidars all appear together.
 
     Args:
         site_id: Cloudnet site identifier.
         date: Measurement date.
-        instrument: Optional reader name to restrict the search to one
-            instrument type.
+        instrument: Optional instrument-id substring to filter by, e.g. `"halo"`,
+            `"pollyxt"` or `"cl61"` (case-insensitive).
 
     Returns:
         One `LidarSource` per distinct instrument, in portal order.
 
     Raises:
-        ValueError: If `instrument` is unknown, or nothing is found.
+        ValueError: If nothing is found.
     """
-    ids = _portal_ids(instrument) if instrument else None
-    metadata = APIClient().files(
-        site_id=site_id, date=date, product_id="lidar", instrument_id=ids
-    )
+    client = APIClient()
+    metadata = [
+        m
+        for product in HARMONIZED_PRODUCTS
+        for m in client.files(site_id=site_id, date=date, product_id=product)
+    ]
+    if instrument is not None:
+        key = instrument.lower()
+        metadata = [
+            m
+            for m in metadata
+            if m.instrument and key in m.instrument.instrument_id.lower()
+        ]
     sources = _group_sources(metadata, raw=False)
     if not sources:
-        msg = f"No lidar product found for {site_id} on {date}"
+        which = f" matching {instrument!r}" if instrument else ""
+        msg = f"No harmonized lidar product{which} found for {site_id} on {date}"
         raise ValueError(msg)
     return sources
 

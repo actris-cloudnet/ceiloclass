@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ceiloclass import cli
+from ceiloclass import cli, download
 from ceiloclass.download import LidarSource, _group_sources, _label
 
 
@@ -60,6 +60,42 @@ def test_group_sources_splits_same_model_by_pid():
 def test_group_sources_lidar_product_has_no_reader():
     md = [_meta("L.nc", _inst("cl61d", "pid-1", "Vaisala CL61"))]
     assert _group_sources(md, raw=False)[0].reader is None
+
+
+def _harmonized_client(monkeypatch):
+    """Patch download.APIClient with one lidar + one doppler-lidar product."""
+    queried = []
+    cl61 = _meta("L.nc", _inst("cl61d", "p-cl", "Vaisala CL61"))
+    halo = _meta("D.nc", _inst("halo-doppler-lidar", "p-halo", "HALO StreamLine"))
+
+    class FakeClient:
+        def files(self, *, product_id, **kwargs):
+            queried.append(product_id)
+            return {"lidar": [cl61], "doppler-lidar": [halo]}.get(product_id, [])
+
+    monkeypatch.setattr(download, "APIClient", FakeClient)
+    return queried
+
+
+def test_list_harmonized_sources_searches_all_products(monkeypatch):
+    queried = _harmonized_client(monkeypatch)
+    sources = download.list_harmonized_sources("uto", "2024-12-31")
+    assert set(queried) == set(download.HARMONIZED_PRODUCTS)
+    assert len(sources) == 2  # ceilometer and doppler-lidar both listed
+    assert all(s.reader is None for s in sources)  # all read with read_lidar
+
+
+def test_list_harmonized_sources_filters_by_instrument_substring(monkeypatch):
+    _harmonized_client(monkeypatch)
+    sources = download.list_harmonized_sources("uto", "2024-12-31", "halo")
+    assert len(sources) == 1
+    assert "HALO" in sources[0].label
+
+
+def test_list_harmonized_sources_errors_when_filter_matches_nothing(monkeypatch):
+    _harmonized_client(monkeypatch)
+    with pytest.raises(ValueError, match="matching 'cs135'"):
+        download.list_harmonized_sources("uto", "2024-12-31", "cs135")
 
 
 def test_label_includes_serial_and_file_count():
