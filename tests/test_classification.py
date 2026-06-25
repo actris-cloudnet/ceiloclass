@@ -74,6 +74,17 @@ def test_adaptive_strong_beta_bimodal_picks_valley():
     assert 3e-7 < cutoff < 5e-6  # in the gap between the two modes
 
 
+def test_adaptive_strong_beta_bimodal_aerosol_not_split_as_cloud():
+    # A dry day with two aerosol modes (e.g. boundary-layer + lofted dust), both
+    # at aerosol-level backscatter. The upper mode must stay below the threshold
+    # (classified aerosol), not be split off as cloud at the valley between them.
+    rng = np.random.default_rng(4)
+    low = rng.lognormal(np.log(4e-7), 0.15, 20000)
+    dust = rng.lognormal(np.log(1e-6), 0.15, 8000)
+    cutoff = _adaptive_strong_beta(_beta(np.concatenate([low, dust])))
+    assert cutoff > 1.1e-6  # above the dust mode, not in the valley below it
+
+
 def test_adaptive_strong_beta_anchors_on_lower_peak():
     # Cloud mode out-numbers aerosol; the threshold must still anchor on the
     # lower aerosol mode, not the taller cloud mode.

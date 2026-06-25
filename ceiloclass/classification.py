@@ -270,6 +270,7 @@ def _adaptive_strong_beta(
     valley_frac: float = 0.5,
     max_peak_ratio: float = 25.0,
     max_strong_beta: float = 1e-5,
+    min_cloud_beta: float = 3e-6,
     default: float = 3e-6,
 ) -> float:
     """Pick the cloud/aerosol backscatter threshold from the data distribution.
@@ -280,9 +281,11 @@ def _adaptive_strong_beta(
     (on a cloudy day the cloud mode can hold more pixels) -- and place the
     threshold past it:
 
-    - if a higher mode exists (bimodal), at the **valley** (lowest count) between
-      the aerosol mode and that next mode -- even a small cloud mode counts, since
-      its valley is what separates real cloud from the bright aerosol tail;
+    - if a higher *cloud-bright* mode exists (bimodal), at the **valley** (lowest
+      count) between the aerosol mode and that next mode. The higher mode must be
+      both >2x the aerosol value and above `min_cloud_beta`: a second mode still
+      at aerosol-level backscatter is layered aerosol (e.g. lofted Saharan dust
+      over Granada), not cloud, and must not be split off as drizzle;
     - otherwise at the aerosol mode's right **shoulder** (where its count first
       falls below `shoulder_frac` of the peak).
 
@@ -329,16 +332,28 @@ def _adaptive_strong_beta(
         if smooth[p : tallest + 1].min() <= valley_frac * smooth[p]:
             peak = int(p)
             break
-    # A higher mode to the right (>2x the aerosol value) is cloud/precip: put the
-    # threshold at the valley between the two. Otherwise use the aerosol shoulder.
-    higher = peak_idx[(peak_idx > peak) & (centers[peak_idx] > 2 * centers[peak])]
+    # A higher, cloud-bright mode (>2x the aerosol value and above
+    # `min_cloud_beta`) is cloud/precip: put the threshold at the valley between
+    # the two. A second mode still at aerosol-level backscatter is layered aerosol,
+    # not cloud, so fall through to the aerosol shoulder instead.
+    higher = peak_idx[
+        (peak_idx > peak)
+        & (centers[peak_idx] > 2 * centers[peak])
+        & (centers[peak_idx] > min_cloud_beta)
+    ]
     if higher.size:
         cloud = int(higher[0])
         threshold = centers[peak + int(np.argmin(smooth[peak : cloud + 1]))]
     else:
+        # Aerosol only (possibly layered). Anchor the shoulder on the *highest*
+        # aerosol mode, so a secondary aerosol layer (e.g. lofted dust) stays
+        # below the threshold rather than being split off by the shoulder landing
+        # in the valley beneath it.
+        aerosol = peak_idx[centers[peak_idx] <= min_cloud_beta]
+        anchor = int(aerosol[-1]) if aerosol.size else peak
         threshold = centers[-1]
-        shoulder = smooth[peak] * shoulder_frac
-        for i in range(peak + 1, len(smooth)):
+        shoulder = smooth[anchor] * shoulder_frac
+        for i in range(anchor + 1, len(smooth)):
             if smooth[i] < shoulder:
                 threshold = centers[i]
                 break
