@@ -35,10 +35,10 @@ ceiloclass -i cl61 ceilo.nc -m model.nc --plot out.png
 ```
 
 Classify the CL61 lidar product at Kenttärova, averaging into
-30 s bins, using the HARMONIE model and showing the plot up to 8 km:
+30 s bins, using the HARMONIE model and showing the plot up to 6 km:
 
 ```sh
-ceiloclass -s kenttarova -d 2023-09-04 -a 30 --harmonized -i cl61 -m harmonie-fmi-6-11 --max-y 8 --show --no-histogram
+ceiloclass -s kenttarova -d 2023-09-04 -a 30 --harmonized -i cl61 -m harmonie-fmi-6-11 --max-y 6 --show --no-histogram
 ```
 
 ![Classification example for Kenttärova, 2023-09-04](docs/example_kenttarova.png)
