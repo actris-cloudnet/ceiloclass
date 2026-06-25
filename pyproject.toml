@@ -12,7 +12,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Topic :: Scientific/Engineering :: Atmospheric Science",
 ]
-dependencies = ["atmoslib", "ceilopyter", "netCDF4", "numpy"]
+dependencies = ["atmoslib", "ceilopyter", "cloudnet-api-client", "matplotlib", "netCDF4", "numpy"]
 description = "Cloud, aerosol and precipitation classification from ceilometer backscatter"
 dynamic = ["version"]
 name = "ceiloclass"
@@ -20,11 +20,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
-all = ["ceiloclass[download,plot]"]
-dev = ["ceiloclass[all]", "pre-commit", "release-version"]
-download = ["cloudnet-api-client"]
-plot = ["matplotlib"]
-test = ["ceiloclass[all]", "mypy", "pytest"]
+dev = ["pre-commit", "release-version"]
+test = ["mypy", "pytest"]
 
 [project.scripts]
 ceiloclass = "ceiloclass.cli:main"

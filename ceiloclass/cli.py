@@ -20,6 +20,7 @@ from ceilopyter import (
 
 from .classification import Target, classify
 from .download import fetch_lidar, fetch_model, fetch_raw
+from .plot import plot_classification
 
 READERS = {
     "cl31": read_cl31,
@@ -144,8 +145,6 @@ def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
             print(f"  {target.name:30s} {count / total * 100:6.2f}%")
 
     if args.plot or args.show:
-        from .plot import plot_classification  # noqa: PLC0415
-
         plot_kwargs = {}
         if args.max_y is not None:
             plot_kwargs["max_height"] = args.max_y * 1000

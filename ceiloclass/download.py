@@ -1,8 +1,6 @@
 """Download raw ceilometer, lidar product and model files from Cloudnet.
 
-Requires the optional `cloudnet-api-client` dependency
-(``pip install ceiloclass[download]``). Files already present in the output
-directory are not downloaded again.
+Files already present in the output directory are not downloaded again.
 """
 
 import datetime
@@ -10,6 +8,8 @@ import logging
 from collections.abc import Iterable
 from os import PathLike
 from pathlib import Path
+
+from cloudnet_api_client import APIClient
 
 INSTRUMENT_IDS: dict[str, tuple[str, ...]] = {
     "cl31": ("cl31",),
@@ -40,8 +40,6 @@ def fetch_raw(
     Returns:
         Local paths to the raw files (downloaded or already present).
     """
-    from cloudnet_api_client import APIClient  # noqa: PLC0415
-
     if instrument not in INSTRUMENT_IDS:
         msg = f"Unknown instrument: {instrument}"
         raise ValueError(msg)
@@ -74,8 +72,6 @@ def fetch_lidar(
     Returns:
         Local path(s) to the lidar product file(s).
     """
-    from cloudnet_api_client import APIClient  # noqa: PLC0415
-
     client = APIClient()
     instrument_id = list(INSTRUMENT_IDS[instrument]) if instrument else None
     metadata = client.files(
@@ -111,8 +107,6 @@ def fetch_model(
     Returns:
         Path to the model file (downloaded or already present).
     """
-    from cloudnet_api_client import APIClient  # noqa: PLC0415
-
     client = APIClient()
     if model_id is not None:
         valid = [str(getattr(m, "id", m)) for m in client.models()]

@@ -1,13 +1,15 @@
-"""Plotting helpers for classification results.
-
-Matplotlib is an optional dependency (``pip install ceiloclass[plot]``).
-"""
+"""Plotting helpers for classification results."""
 
 from os import PathLike
 from typing import Any
 
+import matplotlib
+import matplotlib.dates as mdates
+import matplotlib.patheffects as pe
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+from matplotlib.colors import BoundaryNorm, ListedColormap, LogNorm
 from numpy import ma
 
 from .classification import Classification, Target
@@ -44,19 +46,8 @@ def plot_classification(
         show: Display the figure in an interactive window.
         max_height: Upper limit of the range axis (m).
     """
-    try:
-        import matplotlib  # noqa: PLC0415
-    except ImportError as e:
-        msg = "Plotting requires matplotlib; install with: pip install ceiloclass[plot]"
-        raise ImportError(msg) from e
     if not show:
         matplotlib.use("Agg")  # headless: no display needed for saving
-    import matplotlib.pyplot as plt  # noqa: PLC0415
-    from matplotlib.colors import (  # noqa: PLC0415
-        BoundaryNorm,
-        ListedColormap,
-        LogNorm,
-    )
 
     time = classification.time
     # Only render up to the displayed height — plotting all gates (CL61 reaches
@@ -136,8 +127,6 @@ def plot_classification(
     ax.set_xlabel("Time (UTC)")
     # Show only the hour:minute on the shared time axis; the date is redundant
     # (a single day) and clutters the labels.
-    import matplotlib.dates as mdates  # noqa: PLC0415
-
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     ax.set_ylim(0, min(max_height / 1000, rng_km.max()))
     cbar = fig.colorbar(mesh, ax=ax, ticks=range(len(Target)), pad=0.01)
@@ -211,8 +200,6 @@ def _plot_t0(
     """
     if hide:
         return
-    import matplotlib.patheffects as pe  # noqa: PLC0415
-
     (line,) = ax.plot(
         time,
         t0_km,
