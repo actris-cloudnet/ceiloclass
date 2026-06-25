@@ -73,9 +73,10 @@ def _add_arguments(p: argparse.ArgumentParser) -> None:
         "search; if several instruments remain you are prompted to pick one",
     )
     p.add_argument(
-        "--lidar",
+        "--harmonized",
         action="store_true",
-        help="Input is a Cloudnet harmonized lidar product (calibrated, screened)",
+        help="Input is a Cloudnet harmonized lidar product (calibrated, screened) "
+        "rather than raw instrument data",
     )
     p.add_argument(
         "-m",
@@ -151,21 +152,23 @@ def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     files: list[str | PathLike]
     if args.files:
         # Local files: we can't introspect them, so the reader must be stated.
-        if args.lidar:
+        if args.harmonized:
             reader = read_lidar
         elif args.instrument:
             reader = READERS[args.instrument]
         else:
-            parser.error("provide -i/--instrument, or --lidar for a harmonized product")
+            parser.error(
+                "provide -i/--instrument, or --harmonized for a Cloudnet lidar product"
+            )
         files = list(args.files)
     elif args.site and args.date:
-        if args.lidar:
+        if args.harmonized:
             sources = list_lidar_product_sources(args.site, args.date, args.instrument)
         else:
             sources = list_raw_sources(args.site, args.date, args.instrument)
         source = _select_source(sources, parser)
         files = cast("list[str | PathLike]", download_source(source, args.download_dir))
-        if args.lidar:
+        if args.harmonized:
             reader = read_lidar
         elif source.reader is not None:
             reader = READERS[source.reader]
