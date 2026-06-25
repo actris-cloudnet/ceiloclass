@@ -1,0 +1,60 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[project]
+authors = [{email = "simo.tukiainen@fmi.fi", name = "Simo Tukiainen"}]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+dependencies = ["atmoslib", "ceilopyter", "netCDF4", "numpy"]
+description = "Cloud, aerosol and precipitation classification from ceilometer backscatter"
+dynamic = ["version"]
+name = "ceiloclass"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+all = ["ceiloclass[download,plot]"]
+dev = ["ceiloclass[all]", "pre-commit", "release-version"]
+download = ["cloudnet-api-client"]
+plot = ["matplotlib"]
+test = ["ceiloclass[all]", "mypy", "pytest"]
+
+[project.scripts]
+ceiloclass = "ceiloclass.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/actris-cloudnet/ceiloclass"
+Issues = "https://github.com/actris-cloudnet/ceiloclass/issues"
+
+[tool.hatch.version]
+path = "ceiloclass/version.py"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = ["cftime.*"]
+
+[tool.release-version]
+changelog = "CHANGELOG.md"
+filename = "ceiloclass/version.py"
+pattern = ["__version__ = \"(?P<major>\\d+).(?P<minor>\\d+).(?P<patch>\\d+)\""]
+
+[tool.ruff.lint]
+ignore = ["D1"]
+select = ["B", "D", "E", "F", "I", "PLC", "PLE", "PLW", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["PLC0414"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.tomlsort]
+sort_inline_arrays = true
+trailing_comma_inline_array = true

@@ -1,0 +1,16 @@
+__pycache__
+
+# Data files accidentally downloaded into the repo root (e.g. running the
+# `ceilopyter classify` CLI here with the default --download-dir). Anchored to
+# the root so test fixtures under tests/data/ are unaffected.
+/*.nc
+/*.dat
+/*.DAT
+/*.gz
+/*.png
+/*.part
+
+# Build artifacts
+*.egg-info/
+build/
+dist/

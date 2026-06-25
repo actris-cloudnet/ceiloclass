@@ -1,0 +1,358 @@
+"""Simple target classification from ceilometer + model data (no radar).
+
+Compute the 0 degC isotherm from the model and detect liquid droplet layers
+(split into warm `DROPLET` and sub-freezing `SUPERCOOLED` by the 0 degC level).
+Strong, non-liquid signal is cloud/precipitation -- `ICE` below the freezing
+level (anchored to observed ice, not just the model) and `DRIZZLE_OR_RAIN` above
+it. Every other signal-bearing pixel is `AEROSOL`. There is no melting class: the
+freezing anchor already places the ice/rain boundary at the observed melt.
+"""
+
+from dataclasses import dataclass
+from enum import IntEnum
+from os import PathLike
+
+import numpy as np
+import numpy.typing as npt
+from ceilopyter import Ceilo
+from numpy import ma
+
+from .detection import (
+    _find_t0_alt,
+    correct_supercooled,
+    fill_thin_clouds,
+    find_depol_ice,
+    find_falling,
+    find_freezing_region,
+    find_liquid,
+    grow_liquid,
+)
+from .model import Model, read_model
+
+
+class Target(IntEnum):
+    """Target classification categories."""
+
+    CLEAR = 0
+    DROPLET = 1
+    DRIZZLE_OR_RAIN = 2
+    ICE = 3
+    SUPERCOOLED = 4
+    AEROSOL = 5
+
+
+@dataclass
+class Classification:
+    """Result of `classify`.
+
+    Attributes:
+        time: Time (from the ceilometer).
+        range: Range (m).
+        target: Target category per pixel (`Target` values), time x range.
+        droplet: Liquid droplet layers.
+        cold: Sub-freezing region (above the 0 degC level).
+        aerosol: Aerosol (all other signal).
+        quality: True where model temperature was extrapolated (lower quality).
+        t0_alt: Altitude of the 0 degC isotherm per profile (m), time.
+        strong_beta: Backscatter threshold used to split cloud/precip from aerosol.
+    """
+
+    time: npt.NDArray[np.object_]
+    range: npt.NDArray[np.floating]
+    target: npt.NDArray[np.integer]
+    droplet: npt.NDArray[np.bool_]
+    cold: npt.NDArray[np.bool_]
+    ice: npt.NDArray[np.bool_]
+    rain: npt.NDArray[np.bool_]
+    aerosol: npt.NDArray[np.bool_]
+    quality: npt.NDArray[np.bool_]
+    t0_alt: npt.NDArray[np.floating]
+    strong_beta: float
+
+
+def classify(
+    ceilo: Ceilo,
+    model: str | PathLike | Model,
+    *,
+    use_wet_bulb: bool = True,
+    strong_beta: float | None = None,
+    speckle_min: int = 3,
+) -> Classification:
+    """Classify ceilometer targets: liquid layers + 0 degC line, rest aerosol.
+
+    Strong backscatter (`beta > strong_beta`) that is not a liquid layer is
+    precipitation/cloud: drizzle/rain where the air is above 0 degC, ice where it
+    is below. Weaker signal is aerosol. A speckle filter then clears isolated
+    pixels left by screening noise.
+
+    Args:
+        ceilo: A `Ceilo` with screened `beta` (any instrument except LD40).
+        model: A Cloudnet model file path, or a pre-built `Model`.
+        use_wet_bulb: Use wet-bulb temperature (recommended) instead of dry-bulb.
+        strong_beta: Backscatter above which signal is cloud/precipitation rather
+            than aerosol (sr-1 m-1). `None` (default) picks it from the data,
+            just past the aerosol peak (see `_adaptive_strong_beta`), so it adapts
+            to each site/day's aerosol load instead of a fixed value.
+        speckle_min: Minimum number of classified (non-clear) pixels in the 3x3
+            neighbourhood, including the pixel itself, for it to survive; below
+            this it is cleared as speckle. Set to 1 to disable.
+
+    Returns:
+        A `Classification` on the ceilometer time/range grid.
+    """
+    if ceilo.beta is None:
+        msg = "Ceilo has no screened beta; cannot classify"
+        raise ValueError(msg)
+    if not isinstance(model, Model):
+        model = read_model(model, ceilo.time, ceilo.range, use_wet_bulb=use_wet_bulb)
+
+    beta = ma.asarray(ceilo.beta)
+    depol = None if ceilo.depol is None else ma.asarray(ceilo.depol)
+    tw = model.tw
+    height = np.asarray(ceilo.range, dtype=float)
+    beta_mask = ma.getmaskarray(beta)
+    if strong_beta is None:
+        strong_beta = _adaptive_strong_beta(beta)
+
+    cold = find_freezing_region(tw, height)
+    droplet = find_liquid(beta, height)
+    # High-confidence ice, used only to stop liquid from growing into obvious ice.
+    blocked = find_falling(beta, height, tw)
+    ice_like = None
+    if depol is not None:
+        # CL61 depolarization splits ice from liquid: strongly-depolarizing
+        # pixels are ice, not droplets.
+        ice_like = find_depol_ice(depol, beta_mask)
+        droplet = droplet & ~ice_like
+        blocked = blocked | ice_like
+        # Anchor the freezing region to the observed ice: a biased-high model
+        # 0 degC level leaves depol-confirmed falling ice on its warm side. Extend
+        # the cold region down through any ice column connected to it, so that ice
+        # is classified as ice rather than rain.
+        cold = _extend_cold_to_ice(cold, ice_like, height)
+    # Absorb the weak signal halo around a liquid core into the cloud, then a
+    # small dilation for thicker-cloud edges, then drop liquid that is too cold.
+    droplet = fill_thin_clouds(droplet, ~beta_mask, blocked, height)
+    droplet = grow_liquid(droplet, ~beta_mask, blocked)
+    droplet = correct_supercooled(droplet, tw)
+
+    # Strong, non-liquid signal is precipitation/cloud: ice below 0 degC, drizzle
+    # or rain above it. Weaker signal is aerosol.
+    signal = ~beta_mask
+    strong = signal & (ma.filled(beta, 0.0) > strong_beta) & ~droplet
+    # Ice is strong sub-freezing signal; with depolarization, also faint but
+    # strongly-depolarizing sub-freezing signal -- thin cirrus that the
+    # backscatter threshold misses but whose non-spherical scattering marks it as
+    # ice, not aerosol. `cold` already reaches down to the base of any connected
+    # ice column, so falling ice below a biased 0 degC counts here too.
+    ice = strong & cold
+    if ice_like is not None:
+        ice = ice | (cold & ice_like)
+    rain = strong & ~cold
+    aerosol = signal & ~droplet & ~ice & ~rain
+
+    target = _assemble(droplet, cold, ice, rain, aerosol)
+    target = _despeckle(target, speckle_min)
+
+    return Classification(
+        time=ceilo.time,
+        range=ceilo.range,
+        target=target,
+        droplet=droplet,
+        cold=cold,
+        ice=ice,
+        rain=rain,
+        aerosol=aerosol,
+        quality=model.extrapolated,
+        t0_alt=_find_t0_alt(tw, height),
+        strong_beta=strong_beta,
+    )
+
+
+def _extend_cold_to_ice(
+    cold: npt.NDArray[np.bool_],
+    ice_like: npt.NDArray[np.bool_],
+    height: npt.NDArray[np.floating],
+    *,
+    max_depth: float = 1500.0,
+    smooth_window: int = 10,
+) -> npt.NDArray[np.bool_]:
+    """Extend the freezing region downward through ice connected to it.
+
+    A biased-high model 0 degC level leaves depol-confirmed ice on its warm side
+    (falling ice not yet melted). Starting from the model freezing region, flood
+    downward through contiguous `ice_like` gates -- but no more than `max_depth`
+    below the original boundary, so a deep depolarizing layer (e.g. lofted dust
+    touching cloud) cannot drag the whole column sub-freezing.
+
+    The resulting ice base is then smoothed against single-profile pillars (a
+    noisy depolarizing column flooding to the ground): the base height is replaced
+    by its rolling median over +/-`smooth_window` profiles and the extension is
+    clipped to it. This keys on the base being an outlier, not on a profile count,
+    so it is insensitive to the time averaging and to clustered pillars (the
+    median tolerates a minority of them).
+    """
+    gate_m = float(np.median(np.diff(np.asarray(height, dtype=float))))
+    max_steps = max(int(round(max_depth / gate_m)), 1)
+    extended = cold.copy()
+    above = np.zeros_like(cold)
+    for _ in range(max_steps):
+        above[:, :-1] = extended[:, 1:]
+        above[:, -1] = False
+        newly = above & ice_like & ~extended
+        if not newly.any():
+            break
+        extended |= newly
+    if not (extended & ~cold).any():
+        return extended
+    # Lowest cold gate per profile (the ice base); profiles with no ice are NaN
+    # so they are skipped by the windowed median rather than dragging the floor
+    # upward (a window of mostly clear profiles must not clip a neighbour's ice).
+    n_time, n_gate = cold.shape
+    has_cold = extended.any(axis=1)
+    base = np.where(has_cold, np.argmax(extended, axis=1), np.nan)
+    floor = np.zeros(n_time, dtype=int)
+    for t in range(n_time):
+        lo = max(0, t - smooth_window)
+        hi = min(n_time, t + smooth_window + 1)
+        window = base[lo:hi]
+        # All-NaN windows leave floor at 0 (keep the extension); a profile that
+        # has ice always contributes its own non-NaN base here, so its ice is
+        # never fully clipped.
+        if not np.all(np.isnan(window)):
+            floor[t] = int(np.ceil(np.nanmedian(window)))
+    keep = np.arange(n_gate)[np.newaxis, :] >= floor[:, np.newaxis]
+    return cold | (extended & keep)
+
+
+def _adaptive_strong_beta(
+    beta: ma.MaskedArray,
+    *,
+    n_bins: int = 60,
+    shoulder_frac: float = 0.05,
+    prominence_frac: float = 0.03,
+    valley_frac: float = 0.5,
+    max_peak_ratio: float = 25.0,
+    max_strong_beta: float = 1e-5,
+    default: float = 3e-6,
+) -> float:
+    """Pick the cloud/aerosol backscatter threshold from the data distribution.
+
+    Ceilometer backscatter has a low-value aerosol/background mode; cloud and
+    precipitation form a weaker high tail or a second, higher mode. We anchor on
+    the aerosol mode -- the *lowest* prominent peak, not necessarily the tallest
+    (on a cloudy day the cloud mode can hold more pixels) -- and place the
+    threshold past it:
+
+    - if a higher mode exists (bimodal), at the **valley** (lowest count) between
+      the aerosol mode and that next mode -- even a small cloud mode counts, since
+      its valley is what separates real cloud from the bright aerosol tail;
+    - otherwise at the aerosol mode's right **shoulder** (where its count first
+      falls below `shoulder_frac` of the peak).
+
+    This adapts to each site/day's aerosol load (e.g. a dusty Granada day vs a
+    clean one) instead of a fixed value. The result is capped two ways: at
+    `max_peak_ratio` times the peak, and at the absolute `max_strong_beta`. The
+    latter matters when aerosol and cloud are not cleanly separated (a polar
+    winter continuum of low cloud, where the anchor can land on the cloud mode
+    and the threshold would otherwise run off): aerosol backscatter does not
+    physically exceed ~1e-5 sr-1 m-1, so anything above that is cloud.
+
+    Uses the whole column: the threshold is anchored on the low aerosol peak and
+    the high tail is ignored, so cloud aloft must stay in the distribution for the
+    aerosol->cloud valley to be found (restricting to low gates removes it and
+    collapses the threshold onto the aerosol mode). Returns `default` when there
+    are too few samples.
+    """
+    values = ma.filled(ma.asarray(beta), np.nan).ravel()
+    values = values[np.isfinite(values) & (values > 0)]
+    if values.size < 1000:
+        return default
+    lo, hi = np.percentile(values, [1.0, 99.9])
+    if not hi > lo:
+        return default
+    edges = np.logspace(np.log10(lo), np.log10(hi), n_bins + 1)
+    counts, _ = np.histogram(values, bins=edges)
+    centers = np.sqrt(edges[:-1] * edges[1:])
+    # Light smoothing so noise does not create spurious peaks/troughs.
+    smooth = np.convolve(counts, np.ones(3) / 3, mode="same")
+    # Aerosol peak: default to the tallest mode, but prefer a lower-value mode
+    # when one exists and a real valley separates it from the tallest peak (a
+    # cloudy day's cloud mode can out-count the aerosol mode -- Ny-Alesund). The
+    # valley test rejects mere noise bumps on the aerosol mode's rising edge
+    # (Cluj/Granada), which have no dip between them and the peak.
+    higher_left = np.r_[True, smooth[1:] > smooth[:-1]]
+    higher_right = np.r_[smooth[:-1] > smooth[1:], True]
+    is_peak = higher_left & higher_right & (smooth >= smooth.max() * prominence_frac)
+    peak_idx = np.flatnonzero(is_peak)
+    tallest = int(np.argmax(smooth))
+    peak = tallest
+    for p in peak_idx:
+        if p >= tallest:
+            break
+        if smooth[p : tallest + 1].min() <= valley_frac * smooth[p]:
+            peak = int(p)
+            break
+    # A higher mode to the right (>2x the aerosol value) is cloud/precip: put the
+    # threshold at the valley between the two. Otherwise use the aerosol shoulder.
+    higher = peak_idx[(peak_idx > peak) & (centers[peak_idx] > 2 * centers[peak])]
+    if higher.size:
+        cloud = int(higher[0])
+        threshold = centers[peak + int(np.argmin(smooth[peak : cloud + 1]))]
+    else:
+        threshold = centers[-1]
+        shoulder = smooth[peak] * shoulder_frac
+        for i in range(peak + 1, len(smooth)):
+            if smooth[i] < shoulder:
+                threshold = centers[i]
+                break
+    return float(min(threshold, centers[peak] * max_peak_ratio, max_strong_beta))
+
+
+def _despeckle(
+    target: npt.NDArray[np.integer], min_neighbours: int
+) -> npt.NDArray[np.integer]:
+    """Clear classified pixels with too few classified neighbours (speckle).
+
+    Counts non-clear pixels in each pixel's 3x3 neighbourhood (itself included)
+    and resets to `CLEAR` those below `min_neighbours`. A no-op when
+    `min_neighbours <= 1`.
+    """
+    if min_neighbours <= 1:
+        return target
+    classified = (target != Target.CLEAR).astype(int)
+    cumulative = np.pad(np.cumsum(classified, axis=0), ((1, 0), (0, 0)))
+    n_time = target.shape[0]
+    t_idx = np.arange(n_time)
+    t_hi = np.minimum(t_idx + 2, n_time)
+    t_lo = np.maximum(t_idx - 1, 0)
+    t_sum = cumulative[t_hi] - cumulative[t_lo]
+    cumulative = np.pad(np.cumsum(t_sum, axis=1), ((0, 0), (1, 0)))
+    n_gate = target.shape[1]
+    g_idx = np.arange(n_gate)
+    g_hi = np.minimum(g_idx + 2, n_gate)
+    g_lo = np.maximum(g_idx - 1, 0)
+    counts = cumulative[:, g_hi] - cumulative[:, g_lo]
+    speckle = (target != Target.CLEAR) & (counts < min_neighbours)
+    return np.where(speckle, Target.CLEAR, target)
+
+
+def _assemble(
+    droplet: npt.NDArray[np.bool_],
+    cold: npt.NDArray[np.bool_],
+    ice: npt.NDArray[np.bool_],
+    rain: npt.NDArray[np.bool_],
+    aerosol: npt.NDArray[np.bool_],
+) -> npt.NDArray[np.integer]:
+    """Combine category bits into target codes (later rules overwrite earlier).
+
+    Liquid layers sit on top: `droplet & cold` is supercooled liquid. Strong
+    non-liquid signal is ice (cold) or drizzle/rain (warm); the rest is aerosol.
+    """
+    out = np.zeros(droplet.shape, dtype=int)
+    out[aerosol] = Target.AEROSOL
+    out[ice] = Target.ICE
+    out[rain] = Target.DRIZZLE_OR_RAIN
+    out[droplet & ~cold] = Target.DROPLET
+    out[droplet & cold] = Target.SUPERCOOLED
+    return out
