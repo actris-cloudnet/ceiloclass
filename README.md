@@ -34,12 +34,14 @@ ceiloclass --lidar -s munich -d 2025-05-25 --show
 ceiloclass -i cl61 ceilo.nc -m model.nc --plot out.png
 ```
 
-A fuller example — classify the CL61 lidar product at Kenttärova, averaging into
-30 s bins, using the HARMONIE model and showing the plot:
+Classify the CL61 lidar product at Kenttärova, averaging into
+30 s bins, using the HARMONIE model and showing the plot up to 8 km:
 
 ```sh
-ceiloclass -s kenttarova -d 2023-09-04 -a 30 --lidar -i cl61 -m harmonie-fmi-6-11 --show
+ceiloclass -s kenttarova -d 2023-09-04 -a 30 --lidar -i cl61 -m harmonie-fmi-6-11 --max-y 8 --show --no-histogram
 ```
+
+![Classification example for Kenttärova, 2023-09-04](docs/example_kenttarova.png)
 
 ## Arguments
 
