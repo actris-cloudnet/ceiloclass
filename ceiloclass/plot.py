@@ -183,9 +183,22 @@ def _plot_beta_hist(
             color="black",
             linestyle="--",
             linewidth=1.2,
-            label=f"strong_beta = {threshold:.0e}",
+            label=f"Cloud/aerosol threshold = {_format_beta(threshold, unit=False)}",
         )
         ax.legend(loc="upper right", fontsize=7)
+
+
+_SUPERSCRIPT = str.maketrans("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹")
+
+
+def _format_beta(value: float, *, unit: bool = True) -> str:
+    """Format a backscatter value as e.g. ``3.0×10⁻⁶ sr⁻¹ m⁻¹`` (unit optional)."""
+    suffix = " sr⁻¹ m⁻¹" if unit else ""
+    if value <= 0:
+        return f"{value:g}{suffix}"
+    exponent = int(np.floor(np.log10(value)))
+    mantissa = value / 10.0**exponent
+    return f"{mantissa:.1f}×10{str(exponent).translate(_SUPERSCRIPT)}{suffix}"
 
 
 def _plot_t0(
