@@ -39,7 +39,7 @@ ceilometers, PollyXT, and the experimental doppler-lidars — prompting when
 several are available. Use `-i` to pick one directly, e.g. a HALO doppler lidar:
 
 ```sh
-ceiloclass --harmonized -i halo -s mindelo -d 2024-12-31 --show
+ceiloclass --harmonized -i halo -s bucharest -d 2026-05-19 --show
 ```
 
 Classify the CL61 lidar product at Kenttärova, averaging into
