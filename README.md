@@ -69,6 +69,23 @@ ceiloclass -s kenttarova -d 2023-09-04 -a 30 --harmonized -i cl61 -m harmonie-fm
 | `--max-y`              | Upper limit of the range axis in plots (km).                                                                                                                                                                                                                            |
 | `--no-histogram`       | Omit the diagnostic backscatter histogram panel from plots.                                                                                                                                                                                                             |
 
+## How it works
+
+Each time–range pixel is classified from attenuated backscatter and model
+temperature alone. The method follows CloudnetPy's target
+classification, restricted to the parts that work without radar:
+
+- **Liquid layers** are detected as sharp backscatter peaks. A layer is
+  **supercooled liquid** where the model wet-bulb temperature is below 0 °C, and
+  a warm **liquid droplet** layer otherwise.
+- **Strong, non-liquid signal** is cloud or precipitation: **ice** below the 0 °C
+  level, **drizzle/rain** above it. The backscatter threshold separating this from
+  weaker signal is picked per file from the backscatter histogram, so it adapts
+  to each site/day's aerosol load.
+- Remaining signal is **aerosol**; gates with no signal are **clear**.
+- With a CL61, the depolarization ratio splits ice from liquid (non-spherical ice
+  depolarizes strongly) and anchors the freezing level to the observed ice.
+
 ## License
 
 MIT
