@@ -18,6 +18,8 @@ from ceilopyter import Ceilo
 from numpy import ma
 
 from .detection import (
+    ICE_DEPOL_LIMIT,
+    _fill_runs,
     _find_t0_alt,
     correct_supercooled,
     fill_thin_clouds,
@@ -28,6 +30,15 @@ from .detection import (
     grow_liquid,
 )
 from .model import Model, read_model
+
+MS_TAIL = 80.0
+"""Distance above a liquid layer over which rising depolarization is read as
+multiple scattering, not ice (m).
+
+Inside a liquid layer depolarization climbs from multiple scattering and falls
+back to the background just above the cloud; this is the height over which that
+elevated-depol tail is shielded from the ice veto. The default is the ~90th
+percentile of the tail observed across several CL61 days."""
 
 
 class Target(IntEnum):
@@ -77,6 +88,8 @@ def classify(
     use_wet_bulb: bool = True,
     strong_beta: float | None = None,
     speckle_min: int = 3,
+    ice_depol_limit: float = ICE_DEPOL_LIMIT,
+    ms_tail: float = MS_TAIL,
 ) -> Classification:
     """Classify ceilometer targets: liquid layers + 0 degC line, rest aerosol.
 
@@ -96,6 +109,10 @@ def classify(
         speckle_min: Minimum number of classified (non-clear) pixels in the 3x3
             neighbourhood, including the pixel itself, for it to survive; below
             this it is cleared as speckle. Set to 1 to disable.
+        ice_depol_limit: Depolarization above which a target is ice rather than
+            liquid (CL61 only). See `ICE_DEPOL_LIMIT`.
+        ms_tail: Distance above a liquid layer over which rising depolarization is
+            treated as multiple scattering, not ice (m). See `MS_TAIL`.
 
     Returns:
         A `Classification` on the ceilometer time/range grid.
@@ -122,9 +139,28 @@ def classify(
     if depol is not None:
         # CL61 depolarization splits ice from liquid: strongly-depolarizing
         # pixels are ice, not droplets.
-        ice_like = find_depol_ice(depol, beta_mask)
+        ice_like = find_depol_ice(depol, beta_mask, ice_depol_limit=ice_depol_limit)
+        # ...except inside a liquid layer, where depolarization rises from
+        # MULTIPLE SCATTERING, not ice: it climbs through the layer and drops
+        # back to the background just above it. A flat threshold would carve out
+        # the densest (most multiply-scattering) part of the liquid as ice.
+        # Identify genuine liquid layers -- those with a low-depol
+        # (single-scattering) part, which pure ice lacks -- and shield each whole
+        # layer, plus a short multiple-scattering tail above it (~80 m, the 90th
+        # percentile of the observed tail), from the depol veto.
+        liquid = _fill_runs(droplet & ~ice_like, droplet, height)
+        ms_protected = grow_liquid(
+            liquid, ~beta_mask, blocked, height, grow_up=ms_tail, grow_down=0.0
+        )
+        ice_like = ice_like & ~ms_protected
         droplet = droplet & ~ice_like
-        blocked = blocked | ice_like
+        # With depolarization we know ice directly, so it -- not find_falling's
+        # -15 degC / 2000 m heuristic -- is the barrier to liquid growth. That
+        # heuristic would otherwise cut a genuine supercooled cloud top off at
+        # altitude (e.g. at high-elevation Troll, where the layer sits near the
+        # 2000 m line); depolarization keeps growth out of real ice instead.
+        # find_falling stays the barrier only for instruments without depol.
+        blocked = ice_like
         # Anchor the freezing region to the observed ice: a biased-high model
         # 0 degC level leaves depol-confirmed falling ice on its warm side. Extend
         # the cold region down through any ice column connected to it, so that ice

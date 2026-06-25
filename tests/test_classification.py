@@ -195,6 +195,64 @@ def test_classify_high_depol_cold_layer_is_ice():
     assert not (cls.target == Target.SUPERCOOLED).any()
 
 
+def test_classify_multiple_scattering_top_stays_liquid():
+    # Multiple scattering lifts depolarization toward cloud top: low at the base
+    # (single scattering), high above. Because the layer has a low-depol base it
+    # is genuine liquid, so its high-depol upper gates must NOT be carved out as
+    # ice -- contrast test_classify_high_depol_cold_layer_is_ice (uniform high
+    # depol, which is real ice).
+    beta = _liquid_layer_beta()
+    model = _model(np.full(beta.shape, T0 - 5))  # cold -> supercooled
+    depol = ma.zeros(beta.shape)
+    depol[:, 41:] = 0.4  # high depol from just above the peak upward
+    cls = classify(_synthetic_ceilo(beta, depol), model)
+    assert (cls.target[:, 40] == Target.SUPERCOOLED).all()  # low-depol base
+    assert (cls.target[:, 42] == Target.SUPERCOOLED).all()  # high-depol top, shielded
+    assert not (cls.target[:, 37:44] == Target.ICE).any()  # no part of the layer is ice
+
+
+def test_classify_ice_depol_limit_is_tunable():
+    # A uniform depol-0.4 cold layer is ice by default; raising the limit above
+    # 0.4 turns it back into liquid, confirming the threshold is wired through.
+    beta = _liquid_layer_beta()
+    model = _model(np.full(beta.shape, T0 - 5))
+    depol = ma.array(np.full(beta.shape, 0.4))
+    default = classify(_synthetic_ceilo(beta, depol), model)
+    assert (default.target[:, 40] == Target.ICE).all()
+    raised = classify(_synthetic_ceilo(beta, depol), model, ice_depol_limit=0.5)
+    assert (raised.target[:, 40] == Target.SUPERCOOLED).all()
+
+
+def test_classify_find_falling_does_not_cut_high_supercooled_top():
+    # A cold (-20 C) low-depol supercooled layer whose attenuating top crosses
+    # 2 km must not be chopped to ice by find_falling: with depolarization, depol
+    # (not the -15 C / 2000 m heuristic) governs where liquid stops growing.
+    n_height = 80
+    profile = np.zeros(n_height)
+    # sharp liquid peak ~1.86 km, attenuating low-depol tail up past 2 km
+    profile[60:71] = [
+        3e-6,
+        1e-5,
+        4e-5,
+        6e-5,
+        3e-5,
+        1.5e-5,
+        8e-6,
+        4e-6,
+        2.5e-6,
+        1.6e-6,
+        1.1e-6,
+    ]
+    beta = ma.masked_all((4, n_height))
+    for t in range(4):
+        beta[t, profile > 0] = profile[profile > 0]
+    depol = ma.zeros((4, n_height))  # spherical -> liquid
+    model = _model(np.full((4, n_height), T0 - 20))  # cold enough for find_falling
+    cls = classify(_synthetic_ceilo(beta, depol), model)
+    # gate 67 is 2010 m (above the 2000 m find_falling floor) and low-depol
+    assert (cls.target[:, 67] == Target.SUPERCOOLED).all()
+
+
 def test_classify_thin_cirrus_is_ice_via_depol():
     # Faint (sub-threshold) but strongly-depolarizing sub-freezing signal is ice,
     # not aerosol -- the depol-based cold-side split.

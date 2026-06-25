@@ -175,7 +175,7 @@ def grow_liquid(
     blocked: npt.NDArray[np.bool_],
     height: npt.NDArray[np.floating],
     *,
-    grow_up: float = 30.0,
+    grow_up: float = 100.0,
     grow_down: float = 10.0,
 ) -> npt.NDArray[np.bool_]:
     """Extend liquid layers into the adjacent signal halo (cloud edges).
