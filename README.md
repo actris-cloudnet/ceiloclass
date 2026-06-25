@@ -57,6 +57,7 @@ ceiloclass -s kenttarova -d 2023-09-04 -a 30 --lidar -i cl61 -m harmonie-fmi-6-1
 | `--plot`               | Write a classification plot to this PNG file.                                                                                                                                                                    |
 | `--show`               | Show the plot in a window.                                                                                                                                                                                       |
 | `--max-y`              | Upper limit of the range axis in plots (km).                                                                                                                                                                     |
+| `--no-histogram`       | Omit the diagnostic backscatter histogram panel from plots.                                                                                                                                                      |
 
 ## License
 
