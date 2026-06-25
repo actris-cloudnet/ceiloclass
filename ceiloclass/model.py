@@ -6,6 +6,7 @@ time/range grid.
 """
 
 import datetime
+import logging
 from dataclasses import dataclass
 from os import PathLike
 
@@ -81,18 +82,31 @@ def read_model(
             temp = temperature
 
     obs_range = np.asarray(range, dtype=float)
-    n_mtime = len(model_time)
-    temp_on_range = np.empty((n_mtime, len(obs_range)))
-    model_top = np.empty(n_mtime)
-    for i, (h_i, t_i) in enumerate(zip(height, temp, strict=True)):
+    rows, tops, valid = [], [], []
+    for h_i, t_i in zip(height, temp, strict=True):
         h = ma.filled(ma.masked_invalid(h_i), np.nan)
         v = ma.filled(ma.masked_invalid(t_i), np.nan)
         finite = np.isfinite(h) & np.isfinite(v)
-        if not finite.any():
-            msg = f"Model level {i} has no finite temperature/height values"
-            raise ValueError(msg)
-        temp_on_range[i] = np.interp(obs_range, h[finite], v[finite])
-        model_top[i] = h[finite].max()
+        valid.append(bool(finite.any()))
+        if finite.any():
+            # A model time step with no usable values (occasionally seen in
+            # HARMONIE files) is dropped here and bridged by the time
+            # interpolation below, rather than failing the whole classification.
+            rows.append(np.interp(obs_range, h[finite], v[finite]))
+            tops.append(h[finite].max())
+    if not rows:
+        msg = "Model has no finite temperature/height values"
+        raise ValueError(msg)
+    n_dropped = valid.count(False)
+    if n_dropped:
+        logging.warning(
+            "Dropping %d/%d model time step(s) with no finite temperature/height",
+            n_dropped,
+            len(valid),
+        )
+    model_time = model_time[np.array(valid)]
+    temp_on_range = np.array(rows)
+    model_top = np.array(tops)
 
     ref = model_time[0]
     model_seconds = _to_seconds(model_time, ref)
