@@ -55,6 +55,9 @@ def interpolate_along_time(
     upper = np.clip(np.searchsorted(time, new_time), 1, len(time) - 1)
     lower = upper - 1
     span = time[upper] - time[lower]
-    weight = np.where(span > 0, (new_time - time[lower]) / span, 0.0)
+    # Guard the division so a zero span (e.g. a single source time) doesn't warn;
+    # weight stays 0 there, clamping to the lower (only) sample.
+    weight = np.zeros_like(new_time, dtype=float)
+    np.divide(new_time - time[lower], span, out=weight, where=span > 0)
     weight = np.clip(weight, 0.0, 1.0)[:, np.newaxis]
     return values[lower] * (1 - weight) + values[upper] * weight

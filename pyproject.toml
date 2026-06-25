@@ -42,6 +42,14 @@ path = "ceiloclass/version.py"
 ignore_missing_imports = true
 module = ["cftime.*"]
 
+[tool.pytest.ini_options]
+filterwarnings = [
+  "error",
+  # netCDF4 1.7.4 sets .shape on arrays internally, which NumPy 2.5 deprecates.
+  # Only raised when tests write netCDF fixtures; ceiloclass itself only reads.
+  "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning",
+]
+
 [tool.release-version]
 changelog = "CHANGELOG.md"
 filename = "ceiloclass/version.py"
