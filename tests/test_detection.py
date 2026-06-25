@@ -97,8 +97,19 @@ def test_grow_liquid_absorbs_signal_fringe():
     blocked = np.zeros((1, 6), dtype=bool)
     height = np.array([0.0, 10.0, 20.0, 30.0, 40.0, 50.0])  # 10 m gates
     # one gate (10 m) of signal above and below the core is absorbed; gaps are not
-    grown = grow_liquid(droplet, signal, blocked, height, grow_distance=10.0)
+    grown = grow_liquid(droplet, signal, blocked, height, grow_up=10.0, grow_down=10.0)
     assert grown.tolist() == [[False, True, True, True, True, False]]
+
+
+def test_grow_liquid_grows_more_upward_than_down():
+    signal = np.ones((1, 7), dtype=bool)
+    droplet = np.zeros((1, 7), dtype=bool)
+    droplet[0, 3] = True
+    blocked = np.zeros((1, 7), dtype=bool)
+    height = np.arange(7) * 10.0  # 10 m gates
+    grown = grow_liquid(droplet, signal, blocked, height, grow_up=20.0, grow_down=10.0)
+    # 2 gates up (indices 4, 5), only 1 gate down (index 2)
+    assert grown.tolist() == [[False, False, True, True, True, True, False]]
 
 
 def test_grow_liquid_does_not_cross_blocked_or_gaps():
@@ -106,7 +117,7 @@ def test_grow_liquid_does_not_cross_blocked_or_gaps():
     droplet = np.array([[False, False, True, False, False]])
     blocked = np.array([[False, True, False, False, False]])  # ice just below core
     height = np.array([0.0, 10.0, 20.0, 30.0, 40.0])  # 10 m gates -> 30 m = 3 gates
-    grown = grow_liquid(droplet, signal, blocked, height, grow_distance=30.0)
+    grown = grow_liquid(droplet, signal, blocked, height, grow_up=30.0, grow_down=30.0)
     # growth stops at the blocked gate below, extends up through signal
     assert grown.tolist() == [[False, False, True, True, True]]
 

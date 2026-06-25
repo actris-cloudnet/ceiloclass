@@ -175,35 +175,61 @@ def grow_liquid(
     blocked: npt.NDArray[np.bool_],
     height: npt.NDArray[np.floating],
     *,
-    grow_distance: float = 30.0,
+    grow_up: float = 30.0,
+    grow_down: float = 10.0,
 ) -> npt.NDArray[np.bool_]:
     """Extend liquid layers into the adjacent signal halo (cloud edges).
 
     `find_liquid` marks only the sharp backscatter core of a liquid layer; the
     weaker gates hugging its base and top are still cloud but fall outside the
     gradient bounds and would otherwise become aerosol. Dilate the droplet mask
-    by up to `grow_distance` metres along range into gates that carry signal and
-    are not `blocked` (ice), so the thin fringe is absorbed into the cloud. The
-    distance is converted to a gate count for this instrument's resolution, so a
-    layer grows the same physical amount whatever the range sampling.
+    along range into gates that carry signal and are not `blocked` (ice), so the
+    thin fringe is absorbed into the cloud. Distances are in metres (converted to
+    a gate count for this instrument's resolution), so a layer grows the same
+    physical amount whatever the range sampling.
+
+    Growth is asymmetric. The lidar enters the cloud at its base and is attenuated
+    going up, so the detected top sits below the true top -- grow generously
+    upward to recover it. Below the base is usually sub-cloud aerosol or drizzle,
+    so grow downward only a little, to avoid absorbing it as liquid.
 
     Args:
         droplet: Liquid droplet layers (time x range).
         signal: True where the backscatter is not masked (lidar signal present).
         blocked: Gates the growth must not enter (e.g. the ice region).
-        height: Range (m), used to convert `grow_distance` into a gate count.
-        grow_distance: Maximum distance to grow on each side (m).
+        height: Range (m), used to convert distances into gate counts.
+        grow_up: Maximum distance to grow toward cloud top (m).
+        grow_down: Maximum distance to grow toward cloud base (m).
 
     Returns:
         The droplet mask grown into its connected signal halo.
     """
-    out = droplet.copy()
     allowed = signal & ~blocked
-    n_gates = _n_elements(height, grow_distance)
+    out = _grow_range(droplet, allowed, _n_elements(height, grow_up), up=True)
+    out = _grow_range(out, allowed, _n_elements(height, grow_down), up=False)
+    return out
+
+
+def _grow_range(
+    mask: npt.NDArray[np.bool_],
+    allowed: npt.NDArray[np.bool_],
+    n_gates: int,
+    *,
+    up: bool,
+) -> npt.NDArray[np.bool_]:
+    """Dilate `mask` by `n_gates` along range in one direction, through `allowed`.
+
+    With `up`, a gate joins when the gate just below it is set (growth toward
+    higher range); otherwise the gate just above drives growth (toward the
+    surface).
+    """
+    out = mask.copy()
     for _ in range(n_gates):
         neighbour = np.zeros_like(out)
-        neighbour[:, :-1] |= out[:, 1:]
-        neighbour[:, 1:] |= out[:, :-1]
+        if up:
+            neighbour[:, 1:] |= out[:, :-1]
+        else:
+            neighbour[:, :-1] |= out[:, 1:]
         grown = out | (neighbour & allowed)
         if grown.sum() == out.sum():
             break
