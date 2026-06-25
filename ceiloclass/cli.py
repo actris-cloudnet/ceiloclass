@@ -2,8 +2,11 @@
 
 import argparse
 import logging
+import sys
 from collections.abc import Callable, Sequence
+from os import PathLike
 from pathlib import Path
+from typing import cast
 
 from ceilopyter import (
     Ceilo,
@@ -19,7 +22,13 @@ from ceilopyter import (
 )
 
 from .classification import Target, classify
-from .download import fetch_lidar, fetch_model, fetch_raw
+from .download import (
+    LidarSource,
+    download_source,
+    fetch_model,
+    list_lidar_product_sources,
+    list_raw_sources,
+)
 from .plot import plot_classification
 
 READERS = {
@@ -58,7 +67,11 @@ def _add_classify_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Ceilometer data file(s); if omitted, fetched using --site/--date",
     )
     p.add_argument(
-        "-i", "--instrument", choices=sorted(READERS), help="Instrument (raw input)"
+        "-i",
+        "--instrument",
+        choices=sorted(READERS),
+        help="Instrument (raw input). When fetching, optional: restricts the "
+        "search; if several instruments remain you are prompted to pick one",
     )
     p.add_argument(
         "--lidar",
@@ -101,24 +114,60 @@ def _add_classify_parser(subparsers: argparse._SubParsersAction) -> None:
     p.set_defaults(func=_run_classify)
 
 
+def _select_source(
+    sources: list[LidarSource], parser: argparse.ArgumentParser
+) -> LidarSource:
+    """Pick one instrument: the only one, or prompt the user when there are many.
+
+    With several candidates and no interactive terminal, error out listing them
+    (the user can narrow with `-i`) rather than guessing.
+    """
+    if len(sources) == 1:
+        return sources[0]
+    listing = "\n".join(f"  {s.label}" for s in sources)
+    if not sys.stdin.isatty():
+        parser.error(
+            "several instruments available; run interactively to choose, or pass "
+            f"-i to narrow:\n{listing}"
+        )
+    print("Several instruments available:")
+    for i, source in enumerate(sources, 1):
+        print(f"  [{i}] {source.label}")
+    while True:
+        try:
+            choice = input(f"Select [1-{len(sources)}]: ").strip()
+        except EOFError:
+            parser.exit(1, "\nno instrument selected\n")
+        if choice.isdigit() and 1 <= int(choice) <= len(sources):
+            return sources[int(choice) - 1]
+        print("Please enter a number from the list.")
+
+
 def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     reader: Callable[..., Ceilo]
-    if args.lidar:
-        reader = read_lidar
-    elif args.instrument:
-        reader = READERS[args.instrument]
-    else:
-        parser.error("provide -i/--instrument, or --lidar for a harmonized product")
-
+    files: list[str | PathLike]
     if args.files:
-        files: list = list(args.files)
+        # Local files: we can't introspect them, so the reader must be stated.
+        if args.lidar:
+            reader = read_lidar
+        elif args.instrument:
+            reader = READERS[args.instrument]
+        else:
+            parser.error("provide -i/--instrument, or --lidar for a harmonized product")
+        files = list(args.files)
     elif args.site and args.date:
         if args.lidar:
-            files = fetch_lidar(
-                args.site, args.date, args.download_dir, args.instrument
-            )
+            sources = list_lidar_product_sources(args.site, args.date, args.instrument)
         else:
-            files = fetch_raw(args.instrument, args.site, args.date, args.download_dir)
+            sources = list_raw_sources(args.site, args.date, args.instrument)
+        source = _select_source(sources, parser)
+        files = cast("list[str | PathLike]", download_source(source, args.download_dir))
+        if args.lidar:
+            reader = read_lidar
+        elif source.reader is not None:
+            reader = READERS[source.reader]
+        else:
+            parser.error(f"no raw reader for instrument: {source.label}")
     else:
         parser.error("provide data files, or both --site and --date to fetch them")
     ceilo: Ceilo = reader(files, args.calibration_factor)

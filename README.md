@@ -7,8 +7,19 @@ harmonizing the instrument data.
 
 ## Usage
 
+Fetch and classify a day of raw ceilometer data for a site (the instrument is
+discovered automatically; if a site has several, you are prompted to pick one):
+
 ```sh
-ceiloclass classify --lidar -s leipzig -d 2025-05-25 --show
+ceiloclass classify -s munich -d 2025-05-25 --show
+```
+
+Add `--lidar` to use the Cloudnet harmonized lidar product instead of raw data,
+`-i` to narrow to a particular instrument, or pass local files directly:
+
+```sh
+ceiloclass classify --lidar -s munich -d 2025-05-25 --show
+ceiloclass classify -i cl61 ceilo.nc -m model.nc --plot out.png
 ```
 
 ## License
