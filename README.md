@@ -5,6 +5,18 @@ backscatter and model temperature. Built on
 [ceilopyter](https://github.com/actris-cloudnet/ceilopyter) for reading and
 harmonizing the instrument data.
 
+## Installation
+
+Not yet on PyPI, so install from source:
+
+```sh
+git clone https://github.com/actris-cloudnet/ceiloclass.git
+cd ceiloclass
+python3 -m venv venv
+source venv/bin/activate
+pip install .
+```
+
 ## Usage
 
 Fetch and classify a day of raw ceilometer data for a site (the instrument is
