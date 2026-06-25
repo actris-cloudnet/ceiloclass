@@ -133,7 +133,7 @@ def classify(
     # Absorb the weak signal halo around a liquid core into the cloud, then a
     # small dilation for thicker-cloud edges, then drop liquid that is too cold.
     droplet = fill_thin_clouds(droplet, ~beta_mask, blocked, height)
-    droplet = grow_liquid(droplet, ~beta_mask, blocked)
+    droplet = grow_liquid(droplet, ~beta_mask, blocked, height)
     droplet = correct_supercooled(droplet, tw)
 
     # Strong, non-liquid signal is precipitation/cloud: ice below 0 degC, drizzle
