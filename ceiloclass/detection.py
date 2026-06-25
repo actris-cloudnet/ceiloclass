@@ -69,7 +69,7 @@ def find_liquid(
     height: npt.NDArray[np.floating],
     *,
     peak_amp: float = 1e-6,
-    max_width: float = 300,
+    max_width: float = 250,
     min_points: int = 3,
     min_top_der: float = 1e-7,
     min_alt: float = 100,
