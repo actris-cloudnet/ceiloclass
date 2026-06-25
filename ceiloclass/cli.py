@@ -45,22 +45,21 @@ READERS = {
 def main(argv: Sequence[str] | None = None) -> None:
     """Entry point for the ``ceiloclass`` command."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    parser = argparse.ArgumentParser(prog="ceiloclass")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    _add_classify_parser(subparsers)
+    parser = argparse.ArgumentParser(
+        prog="ceiloclass",
+        description="Classify ceilometer targets using model temperature.",
+    )
+    _add_arguments(parser)
     args = parser.parse_args(argv)
     try:
-        args.func(args, parser)
+        _run_classify(args, parser)
     except (ValueError, OSError) as e:
         # Expected failures (missing files, no data found, unreadable netCDF):
         # show a clean one-line message instead of a full traceback.
         parser.exit(1, f"{parser.prog}: error: {e}\n")
 
 
-def _add_classify_parser(subparsers: argparse._SubParsersAction) -> None:
-    p = subparsers.add_parser(
-        "classify", help="Classify ceilometer targets using model temperature"
-    )
+def _add_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "files",
         nargs="*",
@@ -111,7 +110,6 @@ def _add_classify_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar="KM",
         help="Upper limit of the range axis in plots (km)",
     )
-    p.set_defaults(func=_run_classify)
 
 
 def _select_source(
