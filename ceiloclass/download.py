@@ -5,12 +5,35 @@ Files already present in the output directory are not downloaded again.
 
 import datetime
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
 
-from cloudnet_api_client import APIClient
+from cloudnet_api_client import APIClient, CloudnetAPIError
+
+
+@contextmanager
+def _portal_errors() -> Iterator[None]:
+    """Surface Cloudnet portal rejections as clean `ValueError`s.
+
+    The portal answers an unknown site (or other bad request) with a
+    `CloudnetAPIError` whose message is the raw `errors` field — often a list,
+    e.g. `['Invalid site: foo']`, which prints as an ugly traceback. Re-raise it
+    as a one-line `ValueError` the CLI already renders as `error: <message>`.
+    """
+    try:
+        yield
+    except CloudnetAPIError as e:
+        errors = e.message
+        message = (
+            "; ".join(str(m) for m in errors)
+            if isinstance(errors, list | tuple)
+            else str(errors)
+        )
+        raise ValueError(message) from e
+
 
 INSTRUMENT_IDS: dict[str, tuple[str, ...]] = {
     "cl31": ("cl31",),
@@ -65,7 +88,8 @@ def list_raw_sources(
         ValueError: If `instrument` is unknown, or nothing is found.
     """
     ids = _portal_ids(instrument) if instrument else _ALL_PORTAL_IDS
-    metadata = APIClient().raw_files(site_id=site_id, date=date, instrument_id=ids)
+    with _portal_errors():
+        metadata = APIClient().raw_files(site_id=site_id, date=date, instrument_id=ids)
     sources = _group_sources(metadata, raw=True)
     if not sources:
         what = instrument or "ceilometer/lidar"
@@ -105,11 +129,12 @@ def list_harmonized_sources(
         ValueError: If nothing is found.
     """
     client = APIClient()
-    metadata = [
-        m
-        for product in HARMONIZED_PRODUCTS
-        for m in client.files(site_id=site_id, date=date, product_id=product)
-    ]
+    with _portal_errors():
+        metadata = [
+            m
+            for product in HARMONIZED_PRODUCTS
+            for m in client.files(site_id=site_id, date=date, product_id=product)
+        ]
     if instrument is not None:
         key = instrument.lower()
         metadata = [
@@ -189,14 +214,17 @@ def fetch_model(
         Path to the model file (downloaded or already present).
     """
     client = APIClient()
-    if model_id is not None:
-        valid = [str(getattr(m, "id", m)) for m in client.models()]
-        if model_id not in valid:
-            msg = f"Unknown model '{model_id}'. Available models: {', '.join(valid)}"
-            raise ValueError(msg)
-    metadata = client.files(
-        site_id=site_id, date=date, product_id="model", model_id=model_id
-    )
+    with _portal_errors():
+        if model_id is not None:
+            valid = [str(getattr(m, "id", m)) for m in client.models()]
+            if model_id not in valid:
+                msg = (
+                    f"Unknown model '{model_id}'. Available models: {', '.join(valid)}"
+                )
+                raise ValueError(msg)
+        metadata = client.files(
+            site_id=site_id, date=date, product_id="model", model_id=model_id
+        )
     if not metadata:
         which = f" '{model_id}'" if model_id else ""
         msg = f"No{which} model file found for {site_id} on {date}"

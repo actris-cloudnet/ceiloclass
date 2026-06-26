@@ -98,6 +98,22 @@ def test_list_harmonized_sources_errors_when_filter_matches_nothing(monkeypatch)
         download.list_harmonized_sources("uto", "2024-12-31", "cs135")
 
 
+def test_invalid_site_becomes_clean_value_error(monkeypatch):
+    """A portal CloudnetAPIError (e.g. unknown site) surfaces as a plain ValueError.
+
+    The portal reports it with a list message; it must be flattened to one line,
+    not leak as an uncaught traceback.
+    """
+
+    class FailingClient:
+        def raw_files(self, **kwargs):
+            raise download.CloudnetAPIError(["Invalid site: notarealsite"])
+
+    monkeypatch.setattr(download, "APIClient", FailingClient)
+    with pytest.raises(ValueError, match="^Invalid site: notarealsite$"):
+        download.list_raw_sources("notarealsite", "2025-05-25")
+
+
 def test_label_includes_serial_and_file_count():
     inst = _inst("cl51", "pid-A", "Vaisala CL51", "42")
     assert _label(inst, 3) == "cl51 — Vaisala CL51, SN 42 (3 files)"
