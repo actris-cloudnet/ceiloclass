@@ -275,38 +275,26 @@ def _fill_runs(
     height: npt.NDArray[np.floating],
     *,
     max_thickness: float | None = None,
-    paint: npt.NDArray[np.bool_] | None = None,
-    bridge: float = 0.0,
 ) -> npt.NDArray[np.bool_]:
     """Fill each contiguous run of `run` that contains a `seed` gate.
 
-    Within a qualifying run, gates are set on `paint` (default `run`), so a run
-    can propagate through gates it does not itself fill (e.g. liquid bridging an
-    ice column). Clear-air gaps up to `bridge` metres do not split a run (the gap
-    gates are still only set if they are in `paint`). Runs thicker than
-    `max_thickness` (m) are skipped; `None` fills any thickness. Equivalent to
-    flood-filling `seed` along range through `run`, but in a single pass.
+    Runs thicker than `max_thickness` (m) are skipped; `None` fills any
+    thickness. Equivalent to flood-filling `seed` along range through `run`, but
+    in a single pass.
     """
     height = np.asarray(height, dtype=float)
-    if paint is None:
-        paint = run
     out = seed.copy()
     active = seed & run
     for i in np.nonzero(active.any(axis=1))[0]:
-        for j, k in _iter_runs(run[i], height, bridge):
+        for j, k in _iter_runs(run[i]):
             thin = max_thickness is None or height[k - 1] - height[j] <= max_thickness
             if thin and seed[i, j:k].any():
-                out[i, j:k] |= paint[i, j:k]
+                out[i, j:k] |= run[i, j:k]
     return out
 
 
-def _iter_runs(
-    row: npt.NDArray[np.bool_], height: npt.NDArray[np.floating], bridge: float
-) -> Iterator[tuple[int, int]]:
-    """Yield (start, stop) index spans of the True runs in a 1-D `row`.
-
-    Clear-air gaps spanning at most `bridge` metres do not split a run.
-    """
+def _iter_runs(row: npt.NDArray[np.bool_]) -> Iterator[tuple[int, int]]:
+    """Yield (start, stop) index spans of the contiguous True runs in a 1-D `row`."""
     n = row.shape[0]
     j = 0
     while j < n:
@@ -314,17 +302,8 @@ def _iter_runs(
             j += 1
             continue
         k = j + 1
-        while k < n:
-            if row[k]:
-                k += 1
-                continue
-            nxt = k  # start of a gap; find the next run gate
-            while nxt < n and not row[nxt]:
-                nxt += 1
-            if nxt < n and height[nxt] - height[k - 1] <= bridge:
-                k = nxt + 1  # short gap: bridge it and keep walking the run
-            else:
-                break
+        while k < n and row[k]:
+            k += 1
         yield j, k
         j = k
 
