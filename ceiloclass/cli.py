@@ -187,7 +187,7 @@ def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         ceilo = average_time(ceilo, args.average)
 
     if args.model and Path(args.model).exists():
-        model = args.model  # a local netCDF file
+        model = args.model
     elif args.site and args.date:
         # args.model (if given) is a model id to select which model to fetch.
         model = str(fetch_model(args.site, args.date, args.download_dir, args.model))

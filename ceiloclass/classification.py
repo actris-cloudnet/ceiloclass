@@ -148,17 +148,13 @@ def classify(
     blocked = find_falling(beta, height, tw)
     ice_like = None
     if depol is not None:
-        # CL61 depolarization splits ice from liquid: strongly-depolarizing
-        # pixels are ice, not droplets.
+        # CL61 only: strong depolarization marks ice, not liquid droplets.
         ice_like = find_depol_ice(depol, beta_mask, ice_depol_limit=ice_depol_limit)
-        # ...except inside a liquid layer, where depolarization rises from
-        # MULTIPLE SCATTERING, not ice: it climbs through the layer and drops
-        # back to the background just above it. A flat threshold would carve out
-        # the densest (most multiply-scattering) part of the liquid as ice.
-        # Identify genuine liquid layers -- those with a low-depol
-        # (single-scattering) part, which pure ice lacks -- and shield each whole
-        # layer, plus a short multiple-scattering tail above it (~80 m, the 90th
-        # percentile of the observed tail), from the depol veto.
+        # ...except inside a liquid layer, where rising depolarization is MULTIPLE
+        # SCATTERING, not ice -- a flat threshold would carve out its densest part.
+        # Identify genuine liquid layers (those with a low-depol single-scattering
+        # part, which pure ice lacks) and shield each whole layer, plus a short
+        # scattering tail above it (ms_tail), from the depol veto.
         liquid = _fill_runs(droplet & ~ice_like, droplet, height)
         ms_protected = grow_liquid(
             liquid, ~beta_mask, blocked, height, grow_up=ms_tail, grow_down=0.0
@@ -172,40 +168,29 @@ def classify(
         # 2000 m line); depolarization keeps growth out of real ice instead.
         # find_falling stays the barrier only for instruments without depol.
         blocked = ice_like
-        # Anchor the freezing region to the observed ice: a biased-high model
-        # 0 degC level leaves depol-confirmed falling ice on its warm side. Extend
-        # the cold region down through any ice column connected to it, so that ice
-        # is classified as ice rather than rain. Flood only through CLOUD-STRENGTH
-        # ice: falling ice is precipitation, but a daytime boundary layer can be
-        # full of weakly-backscattering yet strongly-depolarizing aerosol (dust,
-        # pollen) that would otherwise drag the freezing region to the ground.
+        # Anchor the freezing region to observed falling ice (see
+        # _extend_cold_to_ice), flooding only through CLOUD-STRENGTH ice: a daytime
+        # boundary layer can be full of weakly-backscattering yet strongly-
+        # depolarizing aerosol (dust, pollen) that would otherwise drag the
+        # freezing region to the ground.
         strong_ice = ice_like & (ma.filled(beta, 0.0) > strong_beta)
         cold = _extend_cold_to_ice(cold, strong_ice, height)
-    # Absorb the weak signal halo around a liquid core into the cloud, then a
-    # small dilation for thicker-cloud edges, then drop liquid that is too cold.
     droplet = fill_thin_clouds(droplet, ~beta_mask, blocked, height)
     droplet = grow_liquid(droplet, ~beta_mask, blocked, height)
     droplet = correct_supercooled(droplet, tw)
 
-    # Strong, non-liquid signal is precipitation/cloud: ice below 0 degC, drizzle
-    # or rain above it. Weaker signal is aerosol.
     signal = ~beta_mask
     strong = signal & (ma.filled(beta, 0.0) > strong_beta) & ~droplet
     # Ice is strong sub-freezing signal; with depolarization, also faint but
-    # strongly-depolarizing sub-freezing signal -- thin cirrus that the
-    # backscatter threshold misses but whose non-spherical scattering marks it as
-    # ice, not aerosol. `cold` already reaches down to the base of any connected
-    # ice column, so falling ice below a biased 0 degC counts here too.
+    # strongly-depolarizing sub-freezing signal -- thin cirrus the backscatter
+    # threshold misses but whose non-spherical scattering marks it as ice.
     ice = strong & cold
     if ice_like is not None:
         ice = ice | (cold & ice_like)
-    # Drizzle/rain is strong warm signal -- but only where it connects, through
-    # continuous signal, up to a hydrometeor source (a liquid layer or ice):
-    # precipitation and its parent cloud are one contiguous column. A bright warm
-    # layer separated from anything above by clear air is aerosol, not drizzle --
-    # both the humidified marine boundary layer at Mindelo (bright sea-salt haze
-    # with no cloud at all) and a near-surface blob sitting kilometres below an
-    # unrelated cirrus (connected to it only by the "any ice above" test).
+    # Drizzle/rain is strong warm signal that connects up through continuous
+    # signal to a cloud source (see _source_connected); bright warm signal with
+    # no cloud above is aerosol, not drizzle (e.g. the cloud-free marine haze at
+    # Mindelo).
     rain = strong & ~cold
     if drizzle_source_window >= 0:
         rain &= _source_connected(droplet | ice, signal, drizzle_source_window)

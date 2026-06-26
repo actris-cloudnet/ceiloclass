@@ -18,11 +18,11 @@ from .classification import Classification, Target
 # read the same way as standard Cloudnet figures.
 _LABELS: dict[Target, tuple[str, str]] = {
     Target.CLEAR: ("Clear", "#ffffff"),
-    Target.DROPLET: ("Liquid droplets", "#6cffec"),  # Cloudnet "cloud droplets"
-    Target.DRIZZLE_OR_RAIN: ("Drizzle/rain", "#209ff3"),  # Cloudnet "drizzle/rain"
-    Target.ICE: ("Ice", "#a0b0bb"),  # Cloudnet "ice" (lightsteel)
-    Target.SUPERCOOLED: ("Supercooled liquid", "#464ab9"),  # Cloudnet "supercooled"
-    Target.AEROSOL: ("Aerosol", "#cebc89"),  # Cloudnet "aerosol" (lightbrown)
+    Target.DROPLET: ("Liquid droplets", "#6cffec"),
+    Target.DRIZZLE_OR_RAIN: ("Drizzle/rain", "#209ff3"),
+    Target.ICE: ("Ice", "#a0b0bb"),
+    Target.SUPERCOOLED: ("Supercooled liquid", "#464ab9"),
+    Target.AEROSOL: ("Aerosol", "#cebc89"),
 }
 
 
