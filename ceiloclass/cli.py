@@ -41,6 +41,9 @@ READERS = {
     "ld40": read_ld40,
 }
 
+# Default cache for fetched files, anchored to the package (cwd-independent).
+DEFAULT_DOWNLOAD_DIR = Path(__file__).resolve().parent.parent / "data"
+
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Entry point for the ``ceiloclass`` command."""
@@ -94,8 +97,8 @@ def _add_arguments(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--download-dir",
-        default=".",
-        help="Directory for fetched files (default: current directory)",
+        default=str(DEFAULT_DOWNLOAD_DIR),
+        help="Directory for fetched files (default: ceiloclass/data)",
     )
     p.add_argument("--calibration-factor", type=float, help="Override calibration")
     p.add_argument(

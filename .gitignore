@@ -9,6 +9,9 @@ __pycache__
 
 /scripts
 
+# CLI download cache
+/data/
+
 # Regression suite cached data and generated plots
 /regression/data/
 /regression/plots/
