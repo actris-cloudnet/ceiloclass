@@ -277,6 +277,23 @@ def test_classify_thin_cirrus_is_ice_via_depol():
     assert (cls.target[:, 105] == Target.ICE).all()
 
 
+def test_classify_weak_depol_boundary_layer_not_flooded_to_ice():
+    # A daytime boundary layer of weak (sub-threshold) but strongly-depolarizing
+    # aerosol (dust/pollen) below the model 0 degC line must stay aerosol: the
+    # cold region anchors to falling ice only through CLOUD-STRENGTH backscatter,
+    # so this weak column does not drag the freezing region down to the ground.
+    n_time, n_height = 30, 200
+    gate = np.arange(n_height)
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, :120] = 1.5e-6  # weak signal from ground up past the 0 degC line
+    depol = ma.zeros((n_time, n_height))
+    depol[:, :120] = 0.4  # strongly depolarizing throughout (would be ice_like)
+    tw = np.tile(T0 + (100 - gate) * 0.1, (n_time, 1))  # 0 degC at gate 100
+    cls = classify(_synthetic_ceilo(beta, depol), _model(tw), strong_beta=3e-6)
+    assert (cls.target[:, :100] == Target.AEROSOL).all()  # warm side stays aerosol
+    assert not (cls.target[:, :100] == Target.ICE).any()
+
+
 def test_classify_strong_signal_splits_ice_and_rain_by_temperature():
     n_time, n_height = 4, 200
     gate = np.arange(n_height)

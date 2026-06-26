@@ -164,8 +164,12 @@ def classify(
         # Anchor the freezing region to the observed ice: a biased-high model
         # 0 degC level leaves depol-confirmed falling ice on its warm side. Extend
         # the cold region down through any ice column connected to it, so that ice
-        # is classified as ice rather than rain.
-        cold = _extend_cold_to_ice(cold, ice_like, height)
+        # is classified as ice rather than rain. Flood only through CLOUD-STRENGTH
+        # ice: falling ice is precipitation, but a daytime boundary layer can be
+        # full of weakly-backscattering yet strongly-depolarizing aerosol (dust,
+        # pollen) that would otherwise drag the freezing region to the ground.
+        strong_ice = ice_like & (ma.filled(beta, 0.0) > strong_beta)
+        cold = _extend_cold_to_ice(cold, strong_ice, height)
     # Absorb the weak signal halo around a liquid core into the cloud, then a
     # small dilation for thicker-cloud edges, then drop liquid that is too cold.
     droplet = fill_thin_clouds(droplet, ~beta_mask, blocked, height)
