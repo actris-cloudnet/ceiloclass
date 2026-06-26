@@ -9,6 +9,10 @@ __pycache__
 
 /scripts
 
+# Regression suite cached data and generated plots
+/regression/data/
+/regression/plots/
+
 # Editor temp/lock files
 *~
 .#*
