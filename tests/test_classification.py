@@ -299,11 +299,66 @@ def test_classify_strong_signal_splits_ice_and_rain_by_temperature():
     gate = np.arange(n_height)
     beta = ma.masked_all((n_time, n_height))
     beta[:, 20:36] = 5e-5  # bright, low (warm) -- wide, so not a liquid layer
+    beta[:, 36:150] = 5e-6  # signal bridging the warm layer up to the cold ice
     beta[:, 150:166] = 5e-5  # bright, high (cold)
     tw = np.tile(T0 + (100 - gate) * 0.1, (n_time, 1))  # 0 degC at gate 100
     cls = classify(_synthetic_ceilo(beta), _model(tw), strong_beta=1e-5)
     assert (cls.target[:, 28] == Target.DRIZZLE_OR_RAIN).all()  # warm strong
     assert (cls.target[:, 158] == Target.ICE).all()  # cold strong
+
+
+def test_classify_warm_bright_layer_without_cloud_above_is_aerosol():
+    # A bright warm layer with no hydrometeor source above it is aerosol, not
+    # drizzle -- precipitation must fall from a cloud. This is the bright,
+    # humidified marine boundary layer (sea-salt haze) at Mindelo, whose
+    # backscatter clears the cloud threshold yet has no parent cloud.
+    n_time, n_height = 6, 200
+    band = ma.masked_all((n_time, n_height))
+    band[:, 20:36] = 5e-6  # bright, wide, flat warm layer -> not a liquid layer
+    model = _model(np.full((n_time, n_height), 290.0))  # warm everywhere
+
+    lone = classify(_synthetic_ceilo(band), model, strong_beta=3e-6)
+    assert (lone.target[:, 28] == Target.AEROSOL).all()  # no source above
+    assert not (lone.target == Target.DRIZZLE_OR_RAIN).any()
+
+    # Disabling the gate restores the old behaviour (any bright warm = drizzle).
+    ungated = classify(
+        _synthetic_ceilo(band), model, strong_beta=3e-6, drizzle_source_window=-1
+    )
+    assert (ungated.target[:, 28] == Target.DRIZZLE_OR_RAIN).all()
+
+
+def test_classify_warm_bright_layer_below_cloud_stays_drizzle():
+    # The same bright warm layer, now CONNECTED through continuous signal up to a
+    # liquid cloud above it, has a hydrometeor source and is kept as drizzle --
+    # the fix must not break real sub-cloud drizzle.
+    n_time, n_height = 6, 200
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 20:36] = 5e-6  # bright warm layer (the would-be drizzle)
+    beta[:, 36:60] = 8e-7  # weak signal bridging it up to the cloud base
+    beta[:, 60:67] = [5e-7, 1.5e-6, 4e-6, 1.3e-5, 6e-6, 1.2e-6, 3e-7]  # liquid cloud
+    model = _model(np.full((n_time, n_height), 290.0))
+    cls = classify(_synthetic_ceilo(beta), model, strong_beta=3e-6)
+    assert (cls.target[:, 63] == Target.DROPLET).all()  # the cloud above
+    assert (cls.target[:, 28] == Target.DRIZZLE_OR_RAIN).all()  # drizzle below it
+
+
+def test_classify_bright_blob_below_disconnected_cirrus_is_aerosol():
+    # A near-surface bright warm blob with clear air between it and an isolated
+    # high cirrus must stay aerosol: the cirrus is not its source. Guards against
+    # the "any ice anywhere above" rule that classified ground aerosol as drizzle
+    # at Mindelo because of a single despeckled cirrus pixel kilometres above.
+    n_time, n_height = 6, 200
+    gate = np.arange(n_height)
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 5:18] = 5e-6  # bright warm near-surface blob
+    beta[:, 150:153] = 5e-6  # isolated cirrus, far above, clear air between
+    # warm below, sub-freezing only up where the cirrus sits -> cirrus is ice
+    tw = np.tile(T0 + (120 - gate) * 0.2, (n_time, 1))  # 0 degC at gate 120
+    cls = classify(_synthetic_ceilo(beta), _model(tw), strong_beta=3e-6)
+    assert (cls.target[:, 151] == Target.ICE).all()  # the cirrus is ice
+    assert (cls.target[:, 11] == Target.AEROSOL).all()  # blob not sourced by it
+    assert not (cls.target[:, :120] == Target.DRIZZLE_OR_RAIN).any()
 
 
 def test_classify_weak_signal_is_aerosol():

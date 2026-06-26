@@ -90,6 +90,7 @@ def classify(
     speckle_min: int = 3,
     ice_depol_limit: float = ICE_DEPOL_LIMIT,
     ms_tail: float = MS_TAIL,
+    drizzle_source_window: int = 0,
 ) -> Classification:
     """Classify ceilometer targets: liquid layers + 0 degC line, rest aerosol.
 
@@ -113,6 +114,16 @@ def classify(
             liquid (CL61 only). See `ICE_DEPOL_LIMIT`.
         ms_tail: Distance above a liquid layer over which rising depolarization is
             treated as multiple scattering, not ice (m). See `MS_TAIL`.
+        drizzle_source_window: Drizzle/rain is kept only where it connects, through
+            continuous signal, to a hydrometeor source (a liquid layer or ice)
+            directly above it -- precipitation and its parent cloud are one
+            contiguous column (see `_source_connected`). The default (0) requires
+            the source in the same profile. A positive value dilates the source
+            mask by +/- that many profiles in time first, recovering drizzle at a
+            ragged cloud edge where the base flickers out for a profile -- but keep
+            it small: a wide window re-admits cloud-free bright aerosol as drizzle
+            wherever a cloud passes within the window. A negative value disables
+            the gate entirely (any bright warm signal is drizzle).
 
     Returns:
         A `Classification` on the ceilometer time/range grid.
@@ -188,7 +199,16 @@ def classify(
     ice = strong & cold
     if ice_like is not None:
         ice = ice | (cold & ice_like)
+    # Drizzle/rain is strong warm signal -- but only where it connects, through
+    # continuous signal, up to a hydrometeor source (a liquid layer or ice):
+    # precipitation and its parent cloud are one contiguous column. A bright warm
+    # layer separated from anything above by clear air is aerosol, not drizzle --
+    # both the humidified marine boundary layer at Mindelo (bright sea-salt haze
+    # with no cloud at all) and a near-surface blob sitting kilometres below an
+    # unrelated cirrus (connected to it only by the "any ice above" test).
     rain = strong & ~cold
+    if drizzle_source_window >= 0:
+        rain &= _source_connected(droplet | ice, signal, drizzle_source_window)
     aerosol = signal & ~droplet & ~ice & ~rain
 
     target = _assemble(droplet, cold, ice, rain, aerosol)
@@ -263,6 +283,43 @@ def _extend_cold_to_ice(
             floor[t] = int(np.ceil(np.nanmedian(window)))
     keep = np.arange(n_gate)[np.newaxis, :] >= floor[:, np.newaxis]
     return cold | (extended & keep)
+
+
+def _source_connected(
+    cloud: npt.NDArray[np.bool_],
+    signal: npt.NDArray[np.bool_],
+    time_window: int,
+) -> npt.NDArray[np.bool_]:
+    """Mark gates with a cloud ABOVE them, reachable through continuous signal.
+
+    Drizzle/rain hangs *below* its cloud: the precipitation and its source form
+    one contiguous signal column with the cloud on top. A gate is "sourced" only
+    when a `cloud` gate (a liquid layer or ice) lies above it and every gate
+    between carries `signal`. This rejects two false sources:
+
+    - a bright layer separated from everything above by clear air -- e.g. a
+      near-surface aerosol blob far below an unrelated cirrus (the path is broken
+      by the clear air);
+    - a cloud *below* the layer -- e.g. haze sitting above a shallow surface fog
+      (the cloud is not above it).
+
+    The cloud mask is first dilated by +/-`time_window` profiles in time, so a
+    single-profile gap in cloud detection at a ragged cloud edge does not drop a
+    genuine drizzle shaft beside it.
+    """
+    src = cloud
+    for _ in range(max(time_window, 0)):
+        grown = src.copy()
+        grown[1:] |= src[:-1]
+        grown[:-1] |= src[1:]
+        src = grown
+    # Propagate "a cloud sits above, through unbroken signal" downward gate by
+    # gate. Gate g inherits from the gate above (g+1) only when that gate carries
+    # signal, so a clear-air gate breaks the path.
+    above = np.zeros_like(src)
+    for g in range(src.shape[1] - 2, -1, -1):
+        above[:, g] = signal[:, g + 1] & (src[:, g + 1] | above[:, g + 1])
+    return above
 
 
 def _adaptive_strong_beta(
