@@ -1,12 +1,13 @@
 """Cloudnet model file handling for classification.
 
 Reads temperature, pressure and specific humidity from a Cloudnet model netCDF
-file, computes wet-bulb temperature, and interpolates it onto the ceilometer
-time/range grid.
+file, interpolates them onto the ceilometer time/range grid, and computes
+wet-bulb temperature there.
 """
 
 import datetime
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from os import PathLike
 
@@ -59,6 +60,12 @@ def read_model(
     coordinates before interpolating, matching CloudnetPy. Without either, both
     are treated as height-above-ground (no correction).
 
+    Temperature (and, for wet-bulb, pressure and specific humidity) are
+    interpolated onto the ceilometer grid first; wet-bulb is then computed from
+    the interpolated fields, as CloudnetPy does -- not by interpolating a
+    wet-bulb field built on the model grid (the two differ, wet-bulb being
+    nonlinear in its inputs).
+
     Args:
         path: Cloudnet model netCDF file.
         time: Ceilometer time (datetime objects).
@@ -69,30 +76,15 @@ def read_model(
     Returns:
         A `Model` with temperature on the (time, range) grid.
     """
+    wet_bulb = _import_wet_bulb() if use_wet_bulb else None
     with netCDF4.Dataset(path) as nc:
         model_time = num2pydate(nc["time"][:], nc["time"].units)
         height = nc["height"][:]
-        temperature = nc["temperature"][:]
         surface_altitude = _model_surface_altitude(nc)
-        if use_wet_bulb:
-            try:
-                from atmoslib import wet_bulb_temperature  # noqa: PLC0415
-            except ImportError as e:
-                msg = "Wet-bulb temperature requires atmoslib (pip install atmoslib)"
-                raise ImportError(msg) from e
-            pressure = nc["pressure"][:]
-            specific_humidity = nc["q"][:]
-            temp = temperature.astype(float)
-            # Solve wet-bulb only in dense enough air. The model's near-vacuum
-            # top levels (p ~ 1 Pa, tens of km up, far above any ceilometer)
-            # make atmoslib's iterative solver diverge; they are discarded by
-            # the interpolation below anyway, so leave them as dry-bulb.
-            dense = pressure > _MIN_WET_BULB_PRESSURE
-            temp[dense] = wet_bulb_temperature(
-                temperature[dense], pressure[dense], specific_humidity[dense]
-            )
-        else:
-            temp = temperature
+        fields = {"temperature": nc["temperature"][:]}
+        if wet_bulb is not None:
+            fields["pressure"] = nc["pressure"][:]
+            fields["q"] = nc["q"][:]
 
     obs_range = np.asarray(range, dtype=float)
     # Per-step shift to align model height-above-ground onto the observation grid
@@ -101,46 +93,80 @@ def read_model(
         correction = surface_altitude - altitude
     else:
         correction = np.zeros(len(model_time))
-    rows, tops, valid = [], [], []
-    for h_i, t_i, corr in zip(height, temp, correction, strict=True):
-        h = ma.filled(ma.masked_invalid(h_i), np.nan)
-        v = ma.filled(ma.masked_invalid(t_i), np.nan)
-        finite = np.isfinite(h) & np.isfinite(v)
-        valid.append(bool(finite.any()))
-        if finite.any():
-            # A model time step with no usable values (occasionally seen in
-            # HARMONIE files) is dropped here and bridged by the time
-            # interpolation below, rather than failing the whole classification.
-            # Extrapolate (not clamp) outside the model levels, as CloudnetPy
-            # does, so a site below the model surface gets a sensible near-ground
-            # temperature rather than the flat surface value.
-            rows.append(interp_extrap(obs_range - corr, h[finite], v[finite]))
-            tops.append(h[finite].max() + corr)
-    if not rows:
+
+    heights = [ma.filled(ma.masked_invalid(h), np.nan) for h in height]
+    temps = [ma.filled(ma.masked_invalid(t), np.nan) for t in fields["temperature"]]
+    finite = [
+        np.isfinite(h) & np.isfinite(t) for h, t in zip(heights, temps, strict=True)
+    ]
+    # A model time step with no usable values (occasionally seen in HARMONIE
+    # files) is dropped here and bridged by the time interpolation below, rather
+    # than failing the whole classification.
+    valid = np.array([m.any() for m in finite])
+    if not valid.any():
         msg = "Model has no finite temperature/height values"
         raise ValueError(msg)
-    n_dropped = valid.count(False)
+    n_dropped = int((~valid).sum())
     if n_dropped:
         logging.warning(
             "Dropping %d/%d model time step(s) with no finite temperature/height",
             n_dropped,
             len(valid),
         )
-    model_time = model_time[np.array(valid)]
-    temp_on_range = np.array(rows)
-    model_top = np.array(tops)
+    kept = np.nonzero(valid)[0]
 
+    def _to_obs(field: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        # Stage 1: each model profile onto the obs range. Extrapolate (not clamp)
+        # outside the model levels, as CloudnetPy does, so a site below the model
+        # surface gets a sensible near-ground value.
+        on_range = np.array(
+            [
+                interp_extrap(
+                    obs_range - correction[i],
+                    heights[i][finite[i]],
+                    ma.filled(ma.masked_invalid(field[i]), np.nan)[finite[i]],
+                )
+                for i in kept
+            ]
+        )
+        # Stage 2: along time.
+        return interpolate_along_time(obs_seconds, model_seconds, on_range)
+
+    model_time = model_time[valid]
     ref = model_time[0]
     model_seconds = _to_seconds(model_time, ref)
     obs_seconds = _to_seconds(time, ref)
-    tw = interpolate_along_time(obs_seconds, model_seconds, temp_on_range)
+    on_grid = {k: _to_obs(v) for k, v in fields.items()}
 
+    if wet_bulb is not None:
+        tw = on_grid["temperature"].copy()
+        # Solve wet-bulb only in dense enough air; the obs grid is well within
+        # this, but it guards any extrapolated near-vacuum gates above the model.
+        dense = on_grid["pressure"] > _MIN_WET_BULB_PRESSURE
+        tw[dense] = wet_bulb(
+            on_grid["temperature"][dense],
+            on_grid["pressure"][dense],
+            on_grid["q"][dense],
+        )
+    else:
+        tw = on_grid["temperature"]
+
+    model_top = np.array([heights[i][finite[i]].max() + correction[i] for i in kept])
     top = np.interp(obs_seconds, model_seconds, model_top)
     above_top = obs_range[np.newaxis, :] > top[:, np.newaxis]
     outside_time = (obs_seconds < model_seconds[0]) | (obs_seconds > model_seconds[-1])
     extrapolated = above_top | outside_time[:, np.newaxis]
 
     return Model(tw, extrapolated)
+
+
+def _import_wet_bulb() -> Callable[..., npt.NDArray[np.floating]]:
+    try:
+        from atmoslib import wet_bulb_temperature  # noqa: PLC0415
+    except ImportError as e:
+        msg = "Wet-bulb temperature requires atmoslib (pip install atmoslib)"
+        raise ImportError(msg) from e
+    return wet_bulb_temperature
 
 
 def read_altitude(path: str | PathLike) -> float | None:
