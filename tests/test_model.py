@@ -85,6 +85,31 @@ def test_read_model_drops_all_nan_time_step(tmp_path):
     assert np.allclose(model.tw[1], [280.0, 270.0, 250.0], atol=0.5)
 
 
+def test_read_model_aligns_model_surface_to_site_altitude(tmp_path):
+    path = tmp_path / "model.nc"
+    with netCDF4.Dataset(path, "w") as nc:
+        nc.createDimension("time", 1)
+        nc.createDimension("level", 3)
+        t = nc.createVariable("time", "f8", ("time",))
+        t.units = "hours since 2025-06-14 00:00:00 +00:00"
+        t[:] = [0.0]
+        h = nc.createVariable("height", "f4", ("time", "level"))
+        h[:] = np.array([[0.0, 1000.0, 2000.0]])  # height above model surface
+        temp = nc.createVariable("temperature", "f4", ("time", "level"))
+        temp[:] = np.array([[283.16, 273.16, 263.16]])  # 0 degC at 1000 m a.g.l.
+        sfc = nc.createVariable("sfc_geopotential", "f4", ("time",))
+        sfc[:] = [9.80665 * 500.0]  # model surface sits at 500 m a.s.l.
+    time = np.array([datetime.datetime(2025, 6, 14, 0, 0)])
+    obs_range = np.array([200.0, 1300.0])
+    # Model 0 degC is at 1000 m a.g.l. = 1500 m a.s.l.; for a site at 200 m a.s.l.
+    # that is 1300 m above the instrument, not 1000 m.
+    aligned = read_model(path, time, obs_range, altitude=200.0, use_wet_bulb=False)
+    assert np.isclose(aligned.tw[0, 1], 273.16, atol=1e-3)
+    # Without the site altitude the profile is placed too low (here, colder at 1300 m).
+    plain = read_model(path, time, obs_range, use_wet_bulb=False)
+    assert plain.tw[0, 1] < aligned.tw[0, 1] - 1.0
+
+
 def test_read_model_flags_extrapolation(tmp_path):
     path = tmp_path / "model.nc"
     _write_model(path)

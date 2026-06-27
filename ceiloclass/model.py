@@ -24,6 +24,9 @@ T0 = 273.16
 _MIN_WET_BULB_PRESSURE = 1000.0
 """Pressure floor for wet-bulb computation (Pa, ~30 km — above any ceilometer)."""
 
+_G = 9.80665
+"""Standard gravity (m s-2), to convert surface geopotential to height."""
+
 
 @dataclass
 class Model:
@@ -44,14 +47,23 @@ def read_model(
     time: npt.NDArray[np.object_],
     range: npt.NDArray[np.floating],
     *,
+    altitude: float | None = None,
     use_wet_bulb: bool = True,
 ) -> Model:
     """Read model temperature and interpolate it onto the ceilometer grid.
+
+    The model height is height above the model grid cell's surface, the
+    ceilometer range is height above the instrument; the two surfaces can differ
+    by hundreds of metres in complex terrain. Given the site `altitude` and the
+    model's own surface height, both grids are aligned in absolute (a.s.l.)
+    coordinates before interpolating, matching CloudnetPy. Without either, both
+    are treated as height-above-ground (no correction).
 
     Args:
         path: Cloudnet model netCDF file.
         time: Ceilometer time (datetime objects).
         range: Ceilometer range (m).
+        altitude: Site altitude above mean sea level (m); see `read_altitude`.
         use_wet_bulb: Compute wet-bulb temperature instead of dry-bulb.
 
     Returns:
@@ -61,6 +73,7 @@ def read_model(
         model_time = num2pydate(nc["time"][:], nc["time"].units)
         height = nc["height"][:]
         temperature = nc["temperature"][:]
+        surface_altitude = _model_surface_altitude(nc)
         if use_wet_bulb:
             try:
                 from atmoslib import wet_bulb_temperature  # noqa: PLC0415
@@ -82,8 +95,14 @@ def read_model(
             temp = temperature
 
     obs_range = np.asarray(range, dtype=float)
+    # Per-step shift to align model height-above-ground onto the observation grid
+    # in a.s.l. coordinates; zero unless both surface heights are known.
+    if altitude is not None and surface_altitude is not None:
+        correction = surface_altitude - altitude
+    else:
+        correction = np.zeros(len(model_time))
     rows, tops, valid = [], [], []
-    for h_i, t_i in zip(height, temp, strict=True):
+    for h_i, t_i, corr in zip(height, temp, correction, strict=True):
         h = ma.filled(ma.masked_invalid(h_i), np.nan)
         v = ma.filled(ma.masked_invalid(t_i), np.nan)
         finite = np.isfinite(h) & np.isfinite(v)
@@ -92,8 +111,8 @@ def read_model(
             # A model time step with no usable values (occasionally seen in
             # HARMONIE files) is dropped here and bridged by the time
             # interpolation below, rather than failing the whole classification.
-            rows.append(np.interp(obs_range, h[finite], v[finite]))
-            tops.append(h[finite].max())
+            rows.append(np.interp(obs_range - corr, h[finite], v[finite]))
+            tops.append(h[finite].max() + corr)
     if not rows:
         msg = "Model has no finite temperature/height values"
         raise ValueError(msg)
@@ -119,6 +138,28 @@ def read_model(
     extrapolated = above_top | outside_time[:, np.newaxis]
 
     return Model(tw, extrapolated)
+
+
+def read_altitude(path: str | PathLike) -> float | None:
+    """Read the site altitude (m above mean sea level) from a netCDF, if present."""
+    try:
+        with netCDF4.Dataset(path) as nc:
+            if "altitude" in nc.variables:
+                return float(np.asarray(nc["altitude"][:]).ravel()[0])
+    except OSError:
+        return None
+    return None
+
+
+def _model_surface_altitude(
+    nc: netCDF4.Dataset,
+) -> npt.NDArray[np.floating] | None:
+    """Model grid-cell surface altitude per time step (m a.s.l.), or None."""
+    if "sfc_height" in nc.variables:
+        return np.asarray(nc["sfc_height"][:], dtype=float)
+    if "sfc_geopotential" in nc.variables:
+        return np.asarray(nc["sfc_geopotential"][:], dtype=float) / _G
+    return None
 
 
 def _to_seconds(

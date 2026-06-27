@@ -232,6 +232,14 @@ def fetch_model(
     return _download_missing(client, metadata[:1], output_directory)[0]
 
 
+def site_altitude(site_id: str) -> float | None:
+    """Site altitude (m above mean sea level) from the Cloudnet portal, if known."""
+    try:
+        return float(APIClient().site(site_id).altitude)
+    except (OSError, AttributeError, TypeError, ValueError):
+        return None
+
+
 def _download_missing(
     client: object, metadata: Iterable, output_directory: str | PathLike
 ) -> list[Path]:

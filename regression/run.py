@@ -51,7 +51,7 @@ import numpy as np
 import numpy.typing as npt
 from ceilopyter import average_time, read_lidar
 
-from ceiloclass import Target, classify
+from ceiloclass import Target, classify, read_altitude
 from ceiloclass.download import download_source, fetch_model, list_harmonized_sources
 
 BASELINE_PATH = Path(__file__).with_name("baseline.json")
@@ -385,7 +385,7 @@ def run_case(
     ceilo = read_lidar([str(f) for f in files], None)
     if case.average:
         ceilo = average_time(ceilo, case.average)
-    cls = classify(ceilo, str(model))
+    cls = classify(ceilo, str(model), altitude=read_altitude(files[0]))
 
     hours = _hours(cls.time)
     height = np.asarray(cls.range, dtype=float)

@@ -85,6 +85,7 @@ def classify(
     ceilo: Ceilo,
     model: str | PathLike | Model,
     *,
+    altitude: float | None = None,
     use_wet_bulb: bool = True,
     strong_beta: float | None = None,
     speckle_min: int = 3,
@@ -102,6 +103,8 @@ def classify(
     Args:
         ceilo: A `Ceilo` with screened `beta` (any instrument except LD40).
         model: A Cloudnet model file path, or a pre-built `Model`.
+        altitude: Site altitude (m a.s.l.) to align the model profile onto the
+            ceilometer grid; see `read_model`. Ignored if `model` is a `Model`.
         use_wet_bulb: Use wet-bulb temperature (recommended) instead of dry-bulb.
         strong_beta: Backscatter above which signal is cloud/precipitation rather
             than aerosol (sr-1 m-1). `None` (default) picks it from the data,
@@ -132,7 +135,9 @@ def classify(
         msg = "Ceilo has no screened beta; cannot classify"
         raise ValueError(msg)
     if not isinstance(model, Model):
-        model = read_model(model, ceilo.time, ceilo.range, use_wet_bulb=use_wet_bulb)
+        model = read_model(
+            model, ceilo.time, ceilo.range, altitude=altitude, use_wet_bulb=use_wet_bulb
+        )
 
     beta = ma.asarray(ceilo.beta)
     depol = None if ceilo.depol is None else ma.asarray(ceilo.depol)

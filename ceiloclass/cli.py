@@ -28,7 +28,9 @@ from .download import (
     fetch_model,
     list_harmonized_sources,
     list_raw_sources,
+    site_altitude,
 )
+from .model import read_altitude
 from .plot import plot_classification
 
 READERS = {
@@ -197,7 +199,13 @@ def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     else:
         parser.error("provide --model PATH, or both --site and --date to fetch one")
 
-    result = classify(ceilo, model)
+    # Site altitude aligns the model profile to the ceilometer grid; prefer the
+    # data file (works offline), fall back to the portal when only a site is set.
+    altitude = read_altitude(files[0])
+    if altitude is None and args.site:
+        altitude = site_altitude(args.site)
+
+    result = classify(ceilo, model, altitude=altitude)
 
     total = result.target.size
     print(f"{result.target.shape[0]} profiles x {result.target.shape[1]} gates")
