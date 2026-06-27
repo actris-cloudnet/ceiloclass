@@ -16,7 +16,7 @@ import numpy.typing as npt
 from cftime import num2pydate
 from numpy import ma
 
-from ._interp import interpolate_along_time
+from ._interp import interp_extrap, interpolate_along_time
 
 T0 = 273.16
 """Triple point of water (K), used as the freezing threshold."""
@@ -111,7 +111,10 @@ def read_model(
             # A model time step with no usable values (occasionally seen in
             # HARMONIE files) is dropped here and bridged by the time
             # interpolation below, rather than failing the whole classification.
-            rows.append(np.interp(obs_range - corr, h[finite], v[finite]))
+            # Extrapolate (not clamp) outside the model levels, as CloudnetPy
+            # does, so a site below the model surface gets a sensible near-ground
+            # temperature rather than the flat surface value.
+            rows.append(interp_extrap(obs_range - corr, h[finite], v[finite]))
             tops.append(h[finite].max() + corr)
     if not rows:
         msg = "Model has no finite temperature/height values"

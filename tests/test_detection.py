@@ -1,7 +1,7 @@
 import numpy as np
 from numpy import ma
 
-from ceiloclass._interp import interpolate_along_time, local_maxima
+from ceiloclass._interp import interp_extrap, interpolate_along_time, local_maxima
 from ceiloclass.detection import (
     _find_t0_alt,
     correct_supercooled,
@@ -184,6 +184,20 @@ def test_find_depol_ice_requires_signal():
     depol = ma.array([[0.4, 0.4]])
     beta_mask = np.array([[True, False]])
     np.testing.assert_array_equal(find_depol_ice(depol, beta_mask), [[False, True]])
+
+
+def test_interp_extrap_continues_edge_slope():
+    xp = np.array([0.0, 1000.0, 2000.0])
+    fp = np.array([283.16, 273.16, 263.16])  # -0.01 K/m
+    out = interp_extrap(np.array([-100.0, 500.0, 2500.0]), xp, fp)
+    assert np.isclose(out[0], 284.16)  # extrapolated below, not clamped to 283.16
+    assert np.isclose(out[1], 278.16)  # interpolated within range
+    assert np.isclose(out[2], 258.16)  # extrapolated above, not clamped to 263.16
+
+
+def test_interp_extrap_single_point_clamps():
+    out = interp_extrap(np.array([-1.0, 0.0, 1.0]), np.array([0.0]), np.array([5.0]))
+    assert np.allclose(out, 5.0)  # nothing to extrapolate from
 
 
 def test_interpolate_along_time_clamps():

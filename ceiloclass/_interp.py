@@ -32,6 +32,37 @@ def local_maxima(
     return result
 
 
+def interp_extrap(
+    x: npt.NDArray[np.floating],
+    xp: npt.NDArray[np.floating],
+    fp: npt.NDArray[np.floating],
+) -> npt.NDArray[np.floating]:
+    """Linear interpolation that extrapolates beyond the data range.
+
+    Like ``numpy.interp`` within ``[xp[0], xp[-1]]`` but, instead of clamping,
+    continues the edge slope outside it -- matching
+    ``scipy.interpolate.interp1d(xp, fp, fill_value="extrapolate")``. ``xp`` must
+    be increasing and have at least two points.
+
+    Args:
+        x: Query points.
+        xp: Sample coordinates (1-D, increasing).
+        fp: Sample values (1-D, same length as ``xp``).
+
+    Returns:
+        Interpolated/extrapolated values, same shape as ``x``.
+    """
+    x = np.asarray(x, dtype=float)
+    out = np.interp(x, xp, fp)
+    if len(xp) < 2:
+        return out  # nothing to extrapolate from; np.interp already clamped
+    below = x < xp[0]
+    out[below] = fp[0] + (x[below] - xp[0]) * (fp[1] - fp[0]) / (xp[1] - xp[0])
+    above = x > xp[-1]
+    out[above] = fp[-1] + (x[above] - xp[-1]) * (fp[-1] - fp[-2]) / (xp[-1] - xp[-2])
+    return out
+
+
 def interpolate_along_time(
     new_time: npt.NDArray[np.floating],
     time: npt.NDArray[np.floating],

@@ -105,6 +105,9 @@ def test_read_model_aligns_model_surface_to_site_altitude(tmp_path):
     # that is 1300 m above the instrument, not 1000 m.
     aligned = read_model(path, time, obs_range, altitude=200.0, use_wet_bulb=False)
     assert np.isclose(aligned.tw[0, 1], 273.16, atol=1e-3)
+    # The 200 m gate sits below the model surface; it is extrapolated along the
+    # lapse rate (warmer than the surface 283.16 K), not clamped to it.
+    assert aligned.tw[0, 0] > 283.16
     # Without the site altitude the profile is placed too low (here, colder at 1300 m).
     plain = read_model(path, time, obs_range, use_wet_bulb=False)
     assert plain.tw[0, 1] < aligned.tw[0, 1] - 1.0
