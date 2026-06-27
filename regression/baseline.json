@@ -91,6 +91,22 @@
     "strong_beta": 4.99e-6,
     "t0_median": 1105.9
   },
+  "macehead-melting-level": {
+    "checks": {
+      "liquid clouds are detected": 0.02066,
+      "no spurious ice below the melting level": 0.0
+    },
+    "fractions": {
+      "AEROSOL": 0.03369,
+      "CLEAR": 0.94342,
+      "DRIZZLE_OR_RAIN": 0.00223,
+      "DROPLET": 0.02066,
+      "ICE": 0.0,
+      "SUPERCOOLED": 0.0
+    },
+    "strong_beta": 1e-5,
+    "t0_median": 2904.5
+  },
   "mindelo-marine-haze": {
     "checks": {
       "marine haze is not drizzle": 0.05073,

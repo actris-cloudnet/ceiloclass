@@ -399,26 +399,35 @@ def _n_elements(height: npt.NDArray[np.floating], distance: float) -> int:
 def _find_t0_alt(
     temperature: npt.NDArray[np.floating], height: npt.NDArray[np.floating]
 ) -> npt.NDArray[np.floating]:
-    """Altitude of the melting level (topmost 0 degC crossing) per profile.
+    """Altitude of the 0 degC level per profile, keeping the warm air below it.
 
-    This is the level above which the air is continuously sub-freezing -- the ice
-    region for classification. Unlike CloudnetPy's ``find_t0_alt`` (which takes
-    the *lowest* crossing), we anchor on the top of the warm layer: with a winter
-    surface inversion a profile can be sub-zero at the ground, warm aloft, then
-    cold again higher up, and the lowest crossing would collapse the boundary to
-    the ground and mislabel the whole warm column as ice.
+    With a warm surface (the usual case) we take the *lowest* 0 degC crossing, so
+    the boundary tracks the melting level smoothly even through warm-cold-warm
+    layering aloft. Only when the surface itself is sub-freezing -- a winter
+    surface inversion, where the lowest crossing would collapse to the ground and
+    mislabel the warm column above as ice -- do we anchor on the *topmost*
+    crossing instead. CloudnetPy always uses the lowest crossing.
     """
     alt = np.empty(temperature.shape[0])
     for i, prof in enumerate(temperature):
-        warm = np.where(prof >= T0)[0]
-        if len(warm) == 0:
-            alt[i] = height[0]  # whole column sub-freezing
-        elif warm[-1] == len(height) - 1:
-            alt[i] = height[-1]  # warm to the top: no crossing within range
+        if prof[0] >= T0:
+            cold = np.where(prof < T0)[0]
+            if len(cold) == 0:
+                alt[i] = height[-1]  # warm throughout: no crossing within range
+            else:
+                j = cold[0]  # lowest cold gate; the crossing is just below it
+                slope = (height[j] - height[j - 1]) / (prof[j] - prof[j - 1])
+                alt[i] = height[j - 1] + (T0 - prof[j - 1]) * slope
         else:
-            j = warm[-1]  # topmost warm gate; the crossing is just above it
-            slope = (height[j + 1] - height[j]) / (prof[j + 1] - prof[j])
-            alt[i] = height[j] + (T0 - prof[j]) * slope
+            warm = np.where(prof >= T0)[0]
+            if len(warm) == 0:
+                alt[i] = height[0]  # whole column sub-freezing
+            elif warm[-1] == len(height) - 1:
+                alt[i] = height[-1]  # warm to the top: no crossing within range
+            else:
+                j = warm[-1]  # topmost warm gate; the crossing is just above it
+                slope = (height[j + 1] - height[j]) / (prof[j + 1] - prof[j])
+                alt[i] = height[j] + (T0 - prof[j]) * slope
     return alt
 
 

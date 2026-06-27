@@ -218,6 +218,22 @@ CASES: list[Case] = [
         ],
     ),
     Case(
+        id="macehead-melting-level",
+        site="mace-head",
+        date="2025-06-24",
+        instrument="chm15k",
+        note="Warm marine day with a warm-cold-warm temperature structure aloft: "
+        "the 0 degC level must track the lowest crossing smoothly (no kinks from "
+        "latching onto an upper warm layer) and no spurious ice may appear below "
+        "it. The melting level is tracked by the baseline (t0_median).",
+        checks=[
+            Check(
+                "no spurious ice below the melting level", Target.ICE, max_frac=0.005
+            ),
+            Check("liquid clouds are detected", Target.DROPLET, min_frac=0.005),
+        ],
+    ),
+    Case(
         id="leipzig-pollyxt",
         site="leipzig",
         date="2025-05-22",

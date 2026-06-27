@@ -3,6 +3,7 @@ from numpy import ma
 
 from ceiloclass._interp import interpolate_along_time, local_maxima
 from ceiloclass.detection import (
+    _find_t0_alt,
     correct_supercooled,
     fill_thin_clouds,
     find_depol_ice,
@@ -80,6 +81,24 @@ def test_find_freezing_region_crossing():
     crossing = np.argmax(tw[0] < T0)
     assert not cold[:, :crossing].any()
     assert cold[:, crossing:].all()
+
+
+def test_find_t0_alt_warm_surface_takes_lowest_crossing():
+    height = np.arange(8) * 1000.0  # 0..7000 m
+    # Warm surface, cold layer aloft, then a warm layer, then cold again.
+    prof = np.array([T0 + 4, T0 + 1, T0 - 1, T0 - 1, T0 + 1, T0 - 1, T0 - 3, T0 - 5])
+    alt = _find_t0_alt(prof[np.newaxis, :], height)
+    # Lowest crossing is between gate 1 (1000 m) and gate 2 (2000 m), not aloft.
+    assert alt[0] == 1500.0
+
+
+def test_find_t0_alt_cold_surface_takes_topmost_crossing():
+    height = np.arange(8) * 1000.0
+    # Sub-freezing surface (winter inversion): cold, warm aloft, cold again.
+    prof = np.array([T0 - 2, T0 + 1, T0 + 3, T0 + 1, T0 - 1, T0 - 3, T0 - 5, T0 - 7])
+    alt = _find_t0_alt(prof[np.newaxis, :], height)
+    # Topmost crossing is just above the warm layer (gate 3 -> 4), not at ground.
+    assert alt[0] == 3500.0
 
 
 def test_correct_supercooled_removes_very_cold_liquid():
