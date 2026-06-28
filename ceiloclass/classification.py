@@ -147,7 +147,8 @@ def classify(
     if strong_beta is None:
         strong_beta = _adaptive_strong_beta(beta)
 
-    cold = find_freezing_region(tw, height)
+    freezing = find_freezing_region(tw, height)
+    cold = freezing
     droplet = find_liquid(beta, height)
     # High-confidence ice, used only to stop liquid from growing into obvious ice.
     blocked = find_falling(beta, height, tw)
@@ -179,13 +180,24 @@ def classify(
         # depolarizing aerosol (dust, pollen) that would otherwise drag the
         # freezing region to the ground.
         strong_ice = ice_like & (ma.filled(beta, 0.0) > strong_beta)
-        cold = _extend_cold_to_ice(cold, strong_ice, height)
+        cold = _extend_cold_to_ice(freezing, strong_ice, height)
     droplet = fill_thin_clouds(droplet, ~beta_mask, blocked, height)
     droplet = grow_liquid(droplet, ~beta_mask, blocked, height)
     droplet = correct_supercooled(droplet, tw)
 
     signal = ~beta_mask
-    strong = signal & (ma.filled(beta, 0.0) > strong_beta) & ~droplet
+    bright = signal & (ma.filled(beta, 0.0) > strong_beta)
+    if ice_like is not None:
+        # CL61 only: a depol-confirmed ice base sitting ABOVE the model 0 degC line
+        # means the real melting level is higher than the model t0 (biased low):
+        # the cold, cloud-strength, low-depol band between them is ice melting into
+        # rain, not ice. Raise the ice/rain boundary to the observed ice base by
+        # dropping that band from `cold`, so it classifies as drizzle/rain -- the
+        # symmetric counterpart of _extend_cold_to_ice. Keep any find_liquid
+        # supercooled droplets (they have a real backscatter peak) as cold.
+        melt_band = _melt_band_below_ice(ice_like, freezing, bright, height)
+        cold = cold & ~(melt_band & ~droplet)
+    strong = bright & ~droplet
     # Ice is strong sub-freezing signal; with depolarization, also faint but
     # strongly-depolarizing sub-freezing signal -- thin cirrus the backscatter
     # threshold misses but whose non-spherical scattering marks it as ice.
@@ -273,6 +285,51 @@ def _extend_cold_to_ice(
             floor[t] = int(np.ceil(np.nanmedian(window)))
     keep = np.arange(n_gate)[np.newaxis, :] >= floor[:, np.newaxis]
     return cold | (extended & keep)
+
+
+def _melt_band_below_ice(
+    ice_like: npt.NDArray[np.bool_],
+    freezing: npt.NDArray[np.bool_],
+    bright: npt.NDArray[np.bool_],
+    height: npt.NDArray[np.floating],
+    *,
+    max_depth: float = 1500.0,
+) -> npt.NDArray[np.bool_]:
+    """Mark the melting band: low-depol signal linking a depol-ice base to t0.
+
+    Symmetric counterpart of `_extend_cold_to_ice`: when the depol ice base sits
+    ABOVE the model 0 degC line, the real melting level is higher than the model
+    t0, and the cold (per the model), cloud-strength, low-depol band between them
+    is ice melting into rain, mislabelled as ice.
+
+    The band is the low-depol cloud-strength signal (`freezing & bright &
+    ~ice_like`) that is reachable BOTH downward from the ice base
+    (`ice_like & freezing`) AND upward from the warm region below t0 (`~freezing`)
+    -- i.e. a continuous column linking the ice down to the rain across the
+    melting level. Requiring both ends excludes low-depol patches buried inside an
+    ice cloud well above t0 (reachable from ice but not from the warm region, so
+    not melting) and supercooled layers with no ice above them. Each flood is
+    capped at `max_depth`.
+    """
+    gate_m = float(np.median(np.diff(np.asarray(height, dtype=float))))
+    max_steps = max(int(round(max_depth / gate_m)), 1)
+    passable = freezing & bright & ~ice_like
+    down = ice_like & freezing  # seed: the depol ice base and above
+    up = ~freezing  # seed: the warm region below t0
+    nbelow = np.zeros_like(passable)
+    nabove = np.zeros_like(passable)
+    for _ in range(max_steps):
+        nbelow[:, :-1] = down[:, 1:]
+        nbelow[:, -1] = False
+        nabove[:, 1:] = up[:, :-1]
+        nabove[:, 0] = False
+        new_down = nbelow & passable & ~down
+        new_up = nabove & passable & ~up
+        if not (new_down.any() or new_up.any()):
+            break
+        down |= new_down
+        up |= new_up
+    return down & up & passable
 
 
 def _source_connected(

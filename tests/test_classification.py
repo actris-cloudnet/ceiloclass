@@ -11,6 +11,7 @@ from ceiloclass.classification import (
     _assemble,
     _despeckle,
     _extend_cold_to_ice,
+    _melt_band_below_ice,
     classify,
 )
 from ceiloclass.model import T0, Model
@@ -152,6 +153,84 @@ def test_extend_cold_to_ice_ignores_disconnected_ice():
     ice[:, 2:5] = True  # ice well below, not touching the cold region
     extended = _extend_cold_to_ice(cold, ice, height)
     assert np.array_equal(extended, cold)  # no contiguous path -> unchanged
+
+
+def test_melt_band_below_ice_reaches_t0_from_ice_base():
+    n_time, n_gate = 8, 12
+    height = np.arange(n_gate) * 100.0
+    cold = np.zeros((n_time, n_gate), dtype=bool)
+    cold[:, 6:] = True  # 0 degC line at gate 6
+    ice_like = np.zeros((n_time, n_gate), dtype=bool)
+    ice_like[:, 9:] = True  # depol ice base at gate 9, above t0
+    bright = np.zeros((n_time, n_gate), dtype=bool)
+    bright[:, 6:11] = True
+    band = _melt_band_below_ice(ice_like, cold, bright, height)
+    assert band[:, 6:9].all()  # band fills from the ice base down to t0
+    assert not band[:, 5].any()  # warm side untouched
+    assert not band[:, 9:].any()  # the ice seed itself is excluded
+
+
+def test_melt_band_below_ice_stops_at_t0():
+    n_time, n_gate = 8, 12
+    height = np.arange(n_gate) * 100.0
+    cold = np.zeros((n_time, n_gate), dtype=bool)
+    cold[:, 6:] = True
+    ice_like = np.zeros((n_time, n_gate), dtype=bool)
+    ice_like[:, 9:] = True
+    bright = np.zeros((n_time, n_gate), dtype=bool)
+    bright[:, :11] = True  # bright all the way to the ground
+    band = _melt_band_below_ice(ice_like, cold, bright, height)
+    assert band[:, 6:9].all()
+    assert not band[:, :6].any()  # never crosses t0 into the warm region
+
+
+def test_melt_band_below_ice_requires_ice_above():
+    n_time, n_gate = 8, 12
+    height = np.arange(n_gate) * 100.0
+    cold = np.zeros((n_time, n_gate), dtype=bool)
+    cold[:, 6:] = True
+    ice_like = np.zeros((n_time, n_gate), dtype=bool)  # no depol ice anywhere
+    bright = np.zeros((n_time, n_gate), dtype=bool)
+    bright[:, 6:11] = True
+    band = _melt_band_below_ice(ice_like, cold, bright, height)
+    assert not band.any()  # isolated cold low-depol signal is left as-is
+
+
+def test_melt_band_below_ice_excludes_patch_buried_in_ice():
+    # A low-depol patch below ice but with no bright path down to the warm region
+    # (a clear gap beneath it) is reachable from the ice above but NOT from the
+    # warm region -> not a melting layer, so excluded. Regression guard: such
+    # patches inside an ice cloud must not become drizzle.
+    n_time, n_gate = 8, 16
+    height = np.arange(n_gate) * 100.0
+    cold = np.zeros((n_time, n_gate), dtype=bool)
+    cold[:, 4:] = True  # 0 degC at gate 4
+    ice_like = np.zeros((n_time, n_gate), dtype=bool)
+    ice_like[:, 9:15] = True  # ice cloud gates 9-14
+    bright = np.zeros((n_time, n_gate), dtype=bool)
+    bright[:, 7:9] = True  # low-depol patch at 7-8, just below the ice
+    bright[:, 9:15] = True  # the ice itself is bright
+    # gates 4-6 are clear -> the patch has no link down to the warm region
+    band = _melt_band_below_ice(ice_like, cold, bright, height)
+    assert not band.any()  # buried patch is not melting
+
+
+def test_melt_band_below_ice_respects_max_depth():
+    # A long low-depol column links the warm region to the ice base. A tight
+    # max_depth stops the two floods (from the ice above, from the warm below)
+    # from meeting, so no melt band forms; a large cap fills the whole column.
+    n_time, n_gate = 8, 16
+    height = np.arange(n_gate) * 100.0
+    cold = np.zeros((n_time, n_gate), dtype=bool)
+    cold[:, 2:] = True
+    ice_like = np.zeros((n_time, n_gate), dtype=bool)
+    ice_like[:, 14:] = True  # ice base at gate 14
+    bright = np.zeros((n_time, n_gate), dtype=bool)
+    bright[:, 2:14] = True  # 12-gate low-depol column from t0 to the ice base
+    full = _melt_band_below_ice(ice_like, cold, bright, height, max_depth=1500.0)
+    assert full[:, 2:14].all()  # large cap: floods meet, whole column is melt
+    capped = _melt_band_below_ice(ice_like, cold, bright, height, max_depth=250.0)
+    assert not capped.any()  # tight cap: floods cannot span the column
 
 
 # --- classify integration ---------------------------------------------------
@@ -305,6 +384,36 @@ def test_classify_strong_signal_splits_ice_and_rain_by_temperature():
     cls = classify(_synthetic_ceilo(beta), _model(tw), strong_beta=1e-5)
     assert (cls.target[:, 28] == Target.DRIZZLE_OR_RAIN).all()  # warm strong
     assert (cls.target[:, 158] == Target.ICE).all()  # cold strong
+
+
+def test_classify_melt_band_below_ice_is_drizzle():
+    # A bright, wide (non-liquid-layer) column with a depol-ice cap on top and the
+    # model 0 degC below the ice base: the cold low-depol band between t0 and the
+    # ice base is ice melting into rain, so it classifies as drizzle/rain, not ice.
+    n_time, n_height = 4, 200
+    gate = np.arange(n_height)
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 100:140] = 5e-5  # wide flat strong column -> not a liquid layer
+    depol = ma.zeros((n_time, n_height))
+    depol[:, 130:140] = 0.4  # depol ice cap on top
+    tw = np.tile(T0 + (110 - gate) * 0.1, (n_time, 1))  # 0 degC at gate 110
+    cls = classify(_synthetic_ceilo(beta, depol), _model(tw), strong_beta=1e-5)
+    assert (cls.target[:, 120] == Target.DRIZZLE_OR_RAIN).all()  # melt band -> rain
+    assert (cls.target[:, 135] == Target.ICE).all()  # the depol-ice cap stays ice
+
+
+def test_classify_cold_strong_signal_without_ice_above_stays_ice():
+    # The same column with no depol ice cap: nothing seeds the band, so the cold
+    # strong column stays ice (the boundary only moves where depol ice is above).
+    n_time, n_height = 4, 200
+    gate = np.arange(n_height)
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 100:140] = 5e-5
+    depol = ma.zeros((n_time, n_height))  # no high depol anywhere
+    tw = np.tile(T0 + (110 - gate) * 0.1, (n_time, 1))
+    cls = classify(_synthetic_ceilo(beta, depol), _model(tw), strong_beta=1e-5)
+    # The cold region stays ice (the boundary is not raised without depol ice).
+    assert (cls.target[:, 115:140] == Target.ICE).all()
 
 
 def test_classify_warm_bright_layer_without_cloud_above_is_aerosol():

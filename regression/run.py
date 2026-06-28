@@ -105,7 +105,9 @@ CASES: list[Case] = [
         date="2025-05-22",
         instrument="cl61",
         note="Weak but strongly-depolarizing daytime boundary-layer aerosol must "
-        "NOT flood the freezing region to the ground as a fake ice column.",
+        "NOT flood the freezing region to the ground as a fake ice column. Also "
+        "guards the melt-band logic: low-depol patches high inside an ice cloud "
+        "(far above t0) must stay ice, not be relabelled drizzle.",
         checks=[
             Check(
                 "no fake ice column in the warm boundary layer",
@@ -113,6 +115,39 @@ CASES: list[Case] = [
                 max_frac=0.05,
                 hours=(16.5, 16.7),
                 height_m=(0, 1000),
+            ),
+            Check(
+                "no drizzle high inside the ice cloud (well above t0)",
+                Target.DRIZZLE_OR_RAIN,
+                max_frac=0.02,
+                height_m=(2500, 5000),
+            ),
+        ],
+    ),
+    Case(
+        id="lindenberg-melting-above-t0",
+        site="lindenberg",
+        date="2025-06-24",
+        instrument="cl61",
+        note="A depol-confirmed ice base sits ABOVE the model 0 degC line (t0 "
+        "biased low): the cold low-depol band between t0 and that base is ice "
+        "melting into rain, not ice. The ice/rain boundary follows the observed "
+        "ice base (symmetric counterpart of _extend_cold_to_ice). CloudnetPy's "
+        "radar classification for this day confirms a melting layer here.",
+        checks=[
+            Check(
+                "the melt band below the ice base is drizzle/rain",
+                Target.DRIZZLE_OR_RAIN,
+                min_frac=0.10,
+                hours=(11.0, 13.5),
+                height_m=(2100, 2700),
+            ),
+            Check(
+                "ice no longer floods the band down to the model t0",
+                Target.ICE,
+                max_frac=0.55,
+                hours=(11.0, 13.5),
+                height_m=(2100, 2700),
             ),
         ],
     ),
