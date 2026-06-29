@@ -12,6 +12,7 @@ from ceiloclass.classification import (
     _despeckle,
     _extend_cold_to_ice,
     _melt_band_below_ice,
+    _thin_runs,
     classify,
 )
 from ceiloclass.model import T0, Model
@@ -156,18 +157,18 @@ def test_extend_cold_to_ice_ignores_disconnected_ice():
 
 
 def test_melt_band_below_ice_reaches_t0_from_ice_base():
-    n_time, n_gate = 8, 12
+    n_time, n_gate = 8, 16
     height = np.arange(n_gate) * 100.0
     cold = np.zeros((n_time, n_gate), dtype=bool)
     cold[:, 6:] = True  # 0 degC line at gate 6
     ice_like = np.zeros((n_time, n_gate), dtype=bool)
-    ice_like[:, 9:] = True  # depol ice base at gate 9, above t0
+    ice_like[:, 9:] = True  # thick depol ice base at gate 9, above t0
     bright = np.zeros((n_time, n_gate), dtype=bool)
-    bright[:, 6:11] = True
+    bright[:, 6:] = True
     band = _melt_band_below_ice(ice_like, cold, bright, height)
     assert band[:, 6:9].all()  # band fills from the ice base down to t0
     assert not band[:, 5].any()  # warm side untouched
-    assert not band[:, 9:].any()  # the ice seed itself is excluded
+    assert not band[:, 9:].any()  # the (thick) ice seed itself is excluded
 
 
 def test_melt_band_below_ice_stops_at_t0():
@@ -213,6 +214,49 @@ def test_melt_band_below_ice_excludes_patch_buried_in_ice():
     # gates 4-6 are clear -> the patch has no link down to the warm region
     band = _melt_band_below_ice(ice_like, cold, bright, height)
     assert not band.any()  # buried patch is not melting
+
+
+def test_thin_runs_keeps_only_thin_runs():
+    height = np.arange(10) * 100.0  # 100 m gates
+    mask = np.zeros((1, 10), dtype=bool)
+    mask[0, 1:3] = True  # 100 m run (thin)
+    mask[0, 5:9] = True  # 300 m run (thick)
+    out = _thin_runs(mask, height, max_thickness=150.0)
+    assert out[0, 1:3].all()
+    assert not out[0, 5:9].any()
+
+
+def test_melt_band_below_ice_bridges_thin_melting_enhancement():
+    # The melting layer depolarizes -> a thin ice_like enhancement at the melt
+    # level. It is bridged so the band still links the ice base down to the rain.
+    n_time, n_gate = 8, 18
+    height = np.arange(n_gate) * 100.0  # 100 m gates
+    cold = np.zeros((n_time, n_gate), dtype=bool)
+    cold[:, 4:] = True
+    ice_like = np.zeros((n_time, n_gate), dtype=bool)
+    ice_like[:, 5] = True  # thin (1-gate) melting enhancement just above t0
+    ice_like[:, 11:17] = True  # thick real ice cloud
+    bright = np.zeros((n_time, n_gate), dtype=bool)
+    bright[:, 4:17] = True
+    band = _melt_band_below_ice(ice_like, cold, bright, height)
+    assert band[:, 5:11].all()  # enhancement bridged; band linked to the rain
+    assert not band[:, 11:].any()  # thick ice still excluded
+
+
+def test_melt_band_below_ice_does_not_bridge_thick_ice():
+    # A thick ice layer between t0 and a low-depol patch is NOT bridged: the patch
+    # stays out (buried-patch protection preserved).
+    n_time, n_gate = 8, 18
+    height = np.arange(n_gate) * 100.0
+    cold = np.zeros((n_time, n_gate), dtype=bool)
+    cold[:, 4:] = True
+    ice_like = np.zeros((n_time, n_gate), dtype=bool)
+    ice_like[:, 5:10] = True  # thick (400 m) ice barrier above t0
+    ice_like[:, 13:17] = True  # upper ice
+    bright = np.zeros((n_time, n_gate), dtype=bool)
+    bright[:, 4:17] = True
+    band = _melt_band_below_ice(ice_like, cold, bright, height)
+    assert not band[:, 10:13].any()  # patch above the thick barrier stays ice
 
 
 def test_melt_band_below_ice_respects_max_depth():

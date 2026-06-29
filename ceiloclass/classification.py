@@ -287,6 +287,31 @@ def _extend_cold_to_ice(
     return cold | (extended & keep)
 
 
+def _thin_runs(
+    mask: npt.NDArray[np.bool_],
+    height: npt.NDArray[np.floating],
+    max_thickness: float,
+) -> npt.NDArray[np.bool_]:
+    """Mark gates in vertical `mask` runs no thicker than `max_thickness` metres."""
+    h = np.asarray(height, dtype=float)
+    out = np.zeros_like(mask)
+    n = mask.shape[1]
+    for i in range(mask.shape[0]):
+        row = mask[i]
+        j = 0
+        while j < n:
+            if not row[j]:
+                j += 1
+                continue
+            k = j
+            while k < n and row[k]:
+                k += 1
+            if h[k - 1] - h[j] <= max_thickness:
+                out[i, j:k] = True
+            j = k
+    return out
+
+
 def _melt_band_below_ice(
     ice_like: npt.NDArray[np.bool_],
     freezing: npt.NDArray[np.bool_],
@@ -294,6 +319,7 @@ def _melt_band_below_ice(
     height: npt.NDArray[np.floating],
     *,
     max_depth: float = 1500.0,
+    bridge: float = 150.0,
 ) -> npt.NDArray[np.bool_]:
     """Mark the melting band: low-depol signal linking a depol-ice base to t0.
 
@@ -302,18 +328,25 @@ def _melt_band_below_ice(
     t0, and the cold (per the model), cloud-strength, low-depol band between them
     is ice melting into rain, mislabelled as ice.
 
-    The band is the low-depol cloud-strength signal (`freezing & bright &
-    ~ice_like`) that is reachable BOTH downward from the ice base
-    (`ice_like & freezing`) AND upward from the warm region below t0 (`~freezing`)
-    -- i.e. a continuous column linking the ice down to the rain across the
-    melting level. Requiring both ends excludes low-depol patches buried inside an
-    ice cloud well above t0 (reachable from ice but not from the warm region, so
-    not melting) and supercooled layers with no ice above them. Each flood is
-    capped at `max_depth`.
+    The band is the cloud-strength signal in the freezing region that is reachable
+    BOTH downward from the depol ice base (`ice_like & freezing`) AND upward from
+    the warm region below t0 (`~freezing`) -- a continuous column linking the ice
+    down to the rain across the melting level. Requiring both ends excludes
+    low-depol patches buried inside an ice cloud well above t0 (reachable from ice
+    but not from the warm region) and supercooled layers with no ice above them.
+
+    The melting layer itself depolarizes (wet, irregular particles), so a thin
+    high-depol enhancement at the melt level would otherwise read as ice and break
+    the link. A vertically thin `ice_like` run (no thicker than `bridge` metres)
+    is therefore treated as part of the band, while a thick, coherent ice cloud
+    still blocks. Each flood is capped at `max_depth`.
     """
     gate_m = float(np.median(np.diff(np.asarray(height, dtype=float))))
     max_steps = max(int(round(max_depth / gate_m)), 1)
-    passable = freezing & bright & ~ice_like
+    # The melting enhancement is a thin ice_like run; bridge it but keep thick ice
+    # (the real cloud) as a barrier.
+    thin_ice = _thin_runs(ice_like, height, bridge)
+    passable = freezing & bright & (~ice_like | thin_ice)
     down = ice_like & freezing  # seed: the depol ice base and above
     up = ~freezing  # seed: the warm region below t0
     nbelow = np.zeros_like(passable)
