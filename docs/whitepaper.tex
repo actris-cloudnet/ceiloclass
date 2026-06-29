@@ -392,6 +392,37 @@ The algorithm:
         $\sim 10^{-5}\,\betau$, so anything above that is cloud.
 \end{enumerate}
 
+Figure~\ref{fig:adaptive} shows the four qualitatively different distributions
+this must handle, each standing for a documented site/day, with the threshold the
+algorithm returns and the resulting aerosol\,/\,cloud split:
+\begin{description}[style=nextline, leftmargin=1.2em, nosep]
+  \item[(a) Cloudy, bimodal] a clear aerosol mode and a separate cloud mode --- the
+        threshold lands in the valley between them.
+  \item[(b) Dusty, two aerosol modes] a boundary-layer mode plus a lofted-dust
+        mode, both at aerosol-level backscatter (a dusty Granada day): the second
+        mode is \emph{not} cloud-bright, so the threshold sits above it (shoulder)
+        and keeps the dust as aerosol rather than splitting it off as drizzle.
+  \item[(c) Clean, single mode] one aerosol mode with only a weak high tail --- the
+        threshold falls on the mode's right shoulder.
+  \item[(d) Polar-winter continuum] a single low-cloud mode with no separable
+        aerosol mode: the anchor lands on cloud and the threshold would run off,
+        so the absolute $10^{-5}\,\betau$ ceiling holds it down.
+\end{description}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{adaptive_threshold.png}
+\caption{The adaptive threshold $\beta_{\mathrm{strong}}$ (dashed) on four
+representative backscatter histograms, each reproducing a \code{ceiloclass}
+regression case. Bars are coloured by the resulting split: aerosol below the
+threshold (blue), cloud/precipitation above (orange). The same algorithm places
+the cut at the inter-mode valley (a), above a non-bright second aerosol mode (b),
+at the single mode's shoulder (c), and at the absolute ceiling when no aerosol
+mode is separable (d). Regenerate with
+\code{python docs/adaptive\_threshold\_figure.py}.}
+\label{fig:adaptive}
+\end{figure}
+
 The threshold can be overridden by passing \code{strong\_beta=} to
 \code{classify}; the default $3\times10^{-6}\,\betau$ is returned only when there
 are too few samples ($<1000$).
