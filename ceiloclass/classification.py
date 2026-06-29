@@ -21,6 +21,7 @@ from .detection import (
     ICE_DEPOL_LIMIT,
     _fill_runs,
     _find_t0_alt,
+    _iter_runs,
     correct_supercooled,
     fill_thin_clouds,
     find_depol_ice,
@@ -295,20 +296,10 @@ def _thin_runs(
     """Mark gates in vertical `mask` runs no thicker than `max_thickness` metres."""
     h = np.asarray(height, dtype=float)
     out = np.zeros_like(mask)
-    n = mask.shape[1]
-    for i in range(mask.shape[0]):
-        row = mask[i]
-        j = 0
-        while j < n:
-            if not row[j]:
-                j += 1
-                continue
-            k = j
-            while k < n and row[k]:
-                k += 1
+    for i in np.nonzero(mask.any(axis=1))[0]:
+        for j, k in _iter_runs(mask[i]):
             if h[k - 1] - h[j] <= max_thickness:
                 out[i, j:k] = True
-            j = k
     return out
 
 

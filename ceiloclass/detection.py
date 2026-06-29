@@ -416,8 +416,7 @@ def _find_t0_alt(
                 alt[i] = height[-1]  # warm throughout: no crossing within range
             else:
                 j = cold[0]  # lowest cold gate; the crossing is just below it
-                slope = (height[j] - height[j - 1]) / (prof[j] - prof[j - 1])
-                alt[i] = height[j - 1] + (T0 - prof[j - 1]) * slope
+                alt[i] = _interp_t0_alt(height, prof, j - 1, j)
         else:
             warm = np.where(prof >= T0)[0]
             if len(warm) == 0:
@@ -426,9 +425,16 @@ def _find_t0_alt(
                 alt[i] = height[-1]  # warm to the top: no crossing within range
             else:
                 j = warm[-1]  # topmost warm gate; the crossing is just above it
-                slope = (height[j + 1] - height[j]) / (prof[j + 1] - prof[j])
-                alt[i] = height[j] + (T0 - prof[j]) * slope
+                alt[i] = _interp_t0_alt(height, prof, j, j + 1)
     return alt
+
+
+def _interp_t0_alt(
+    height: npt.NDArray[np.floating], prof: npt.NDArray[np.floating], a: int, b: int
+) -> float:
+    """Linear-interpolate the altitude of the `T0` crossing between gates a and b."""
+    slope = (height[b] - height[a]) / (prof[b] - prof[a])
+    return float(height[a] + (T0 - prof[a]) * slope)
 
 
 def _window_count(mask: npt.NDArray[np.bool_], half: int) -> npt.NDArray[np.intp]:
