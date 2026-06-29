@@ -25,3 +25,13 @@ __pycache__
 *.egg-info/
 build/
 dist/
+
+# LaTeX build artifacts (keep the .tex sources, ignore the generated output)
+*.aux
+*.toc
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+docs/*.log
+docs/*.pdf

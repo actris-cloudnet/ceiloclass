@@ -1,0 +1,595 @@
+\documentclass[11pt,a4paper]{article}
+
+% --- packages (all standard TeX Live) ---
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,fit,backgrounds,calc}
+\usepackage[hidelinks]{hyperref}
+
+% allow TeX a little slack so long \texttt tokens don't overflow the margin
+\emergencystretch=3em
+
+% --- convenience macros ---
+\newcommand{\betau}{\ensuremath{\mathrm{sr^{-1}\,m^{-1}}}}
+\newcommand{\degc}{\ensuremath{^\circ\mathrm{C}}}
+\newcommand{\Tzero}{\ensuremath{T_0}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\target}[1]{\textsc{#1}}
+
+\title{\textbf{ceiloclass}: radar-free target classification\\
+from a single ceilometer and a model temperature field}
+\author{Cloudnet / FMI}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+\code{ceiloclass} classifies atmospheric targets --- cloud droplets, supercooled
+liquid, ice, drizzle/rain and aerosol --- from a \emph{single} ceilometer or
+lidar (attenuated backscatter, plus depolarization on the Vaisala CL61) together
+with a Cloudnet numerical-weather-model temperature field. It carries \emph{no}
+cloud radar, and is a port of the radar-free parts of CloudnetPy's categorize and
+target-classification code. The pipeline is one-directional:
+\textbf{read $\rightarrow$ model $\rightarrow$ detect $\rightarrow$ classify
+$\rightarrow$ plot}. This paper documents each step, the physical reasoning
+behind it, and --- importantly --- the places where the implementation
+\emph{deliberately diverges} from CloudnetPy to compensate for the missing radar.
+The three principal divergences are a data-adaptive backscatter threshold, a
+top-most freezing-level crossing, and (on the CL61) the use of depolarization to
+anchor the ice/rain boundary to observed ice rather than to the raw model
+\Tzero{} level.
+\end{abstract}
+
+\tableofcontents
+\medskip
+\hrule
+
+%======================================================================
+\section{Introduction}
+%======================================================================
+
+A ceilometer measures range-corrected attenuated backscatter $\beta(t, z)$ as a
+function of time $t$ and range $z$. Unlike a cloud radar it cannot, on its own,
+separate hydrometeor phase: a bright backscatter return may be a liquid droplet
+cloud, falling ice, or dense aerosol. CloudnetPy resolves this ambiguity by
+combining lidar with radar reflectivity, Doppler velocity and (for the CL61)
+linear depolarization. \code{ceiloclass} reconstructs as much of that
+classification as possible \emph{without} the radar, leaning instead on:
+
+\begin{enumerate}[nosep]
+  \item the \textbf{model temperature field}, which fixes where the air is warm
+        enough for liquid and cold enough for ice;
+  \item the \textbf{shape of the backscatter profile}, which distinguishes a
+        sharp liquid-droplet peak from a diffuse aerosol or ice return;
+  \item \textbf{linear depolarization} on the CL61, which directly separates
+        (spherical, weakly depolarizing) liquid from (non-spherical, strongly
+        depolarizing) ice.
+\end{enumerate}
+
+The output is a per-pixel \target{Target} category on the ceilometer
+$(\text{time}\times\text{range})$ grid. Reading and harmonizing raw instrument
+data is delegated to \code{ceilopyter}, which yields a \code{Ceilo} object
+exposing \code{time}, \code{range}, \code{beta} (screened backscatter, a masked
+array whose mask means ``no signal'') and, when available, \code{depol}.
+
+\paragraph{Notation.}
+Throughout, $\beta$ is the screened backscatter (\betau), $z$ the range above the
+instrument (m), $t$ time, $T_w$ the wet-bulb temperature (K), and
+$\Tzero = 273.16\,\mathrm{K}$ the freezing threshold (the triple point of water)
+used everywhere as the liquid/ice temperature boundary. A boolean field over the
+grid is called a \emph{mask}; ``signal'' denotes the unmasked pixels
+$\neg\,\mathrm{mask}(\beta)$.
+
+%======================================================================
+\section{Pipeline overview}
+%======================================================================
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  node distance=9mm and 18mm,
+  data/.style={draw, rounded corners=1pt, align=center, inner sep=5pt,
+               text width=38mm, font=\small\itshape, fill=gray!10},
+  proc/.style={draw, rounded corners=3pt, align=center, inner sep=5pt,
+               text width=44mm, minimum height=13mm, font=\small, fill=blue!6},
+  big/.style={draw, rounded corners=3pt, align=center, inner sep=6pt,
+              text width=108mm, minimum height=13mm, font=\small, fill=blue!12},
+  result/.style={draw, rounded corners=1pt, align=center, inner sep=5pt,
+              text width=62mm, font=\small\itshape, fill=gray!10},
+  arr/.style={-{Latex[length=2.4mm]}, thick, rounded corners=3pt},
+  feed/.style={arr, dashed}
+]
+% inputs
+\node[data] (ceilo) {Ceilometer\\[1pt] $\beta$,\ depol};
+\node[data, right=of ceilo] (model) {Cloudnet model\\[1pt] $T$,\ $p$,\ $q$};
+% processing column
+\node[proc, below=of ceilo] (detect) {\textbf{detection.py}\\[2pt]
+  liquid layers, freezing region, cold ice, depol ice};
+\node[proc, below=of model] (mod) {\textbf{model.py}\\[2pt]
+  align grids, interpolate, wet-bulb $T_w$};
+% orchestrator, spanning both columns
+\node[big, below=11mm of $(detect.south)!0.5!(mod.south)$, anchor=north] (classify)
+  {\textbf{classification.py}\ ---\ \code{classify()}\\[2pt]
+   adaptive threshold, depol refinements,\\
+   melt band, drizzle source gate, assemble};
+% output
+\node[result, below=of classify] (output)
+  {Target grid\\[1pt] \{clear, droplet, drizzle/rain, ice, supercooled, aerosol\}};
+
+% vertical data flow
+\draw[arr] (ceilo) -- (detect);
+\draw[arr] (model) -- (mod);
+\draw[arr] (detect.south) -- (detect.south |- classify.north);
+\draw[arr] (mod.south)    -- (mod.south    |- classify.north);
+\draw[arr] (classify) -- (output);
+% model temperature also feeds the temperature-based detection masks
+% (freezing region, cold ice, supercooled limit)
+\draw[arr] (mod.west) -- node[above=1pt, font=\scriptsize]{$T_w$} (detect.east);
+% raw beta/depol used directly by classify, routed down a clear left lane
+\draw[feed] (ceilo.west) -- ++(-7mm,0) |- (classify.west);
+\end{tikzpicture}
+\caption{Data flow. Solid arrows are the main pipeline; the dashed feed marks the
+raw backscatter/depolarization that \code{classify} also consumes directly (for
+the adaptive threshold and the depol refinements), not only via
+\code{detection.py}. The model wet-bulb temperature $T_w$ also feeds the
+temperature-based detection masks (the freezing region, cold ice and the
+supercooled limit), so several \code{detection.py} primitives depend on the model,
+not on the lidar alone. Detection primitives are pure boolean masks; \code{classify}
+orchestrates them into the final category grid.}
+\label{fig:pipeline}
+\end{figure}
+
+The modules map onto the stages of Figure~\ref{fig:pipeline}:
+\begin{description}[style=nextline, leftmargin=1.2em, nosep]
+  \item[\code{model.py}] reads the model file, aligns and interpolates it onto
+        the ceilometer grid, and computes wet-bulb temperature
+        (Section~\ref{sec:model}).
+  \item[\code{detection.py}] pure detection primitives, each a boolean mask
+        (Section~\ref{sec:detect}).
+  \item[\code{classification.py}] the \code{classify} orchestration, the adaptive
+        backscatter threshold and the CL61 depolarization refinements
+        (Sections~\ref{sec:threshold}--\ref{sec:classify}).
+  \item[\code{\_interp.py}] numpy-only interpolation/peak helpers.
+  \item[\code{download.py}, \code{plot.py}] Cloudnet portal fetching and curtain
+        plotting (not described here).
+\end{description}
+
+%======================================================================
+\section{Model temperature processing}
+\label{sec:model}
+%======================================================================
+
+The model provides temperature $T$, pressure $p$ and specific humidity $q$ on a
+coarse $(\text{time}\times\text{height})$ grid. Three things must happen before
+it can be used: the vertical coordinate must be reconciled with the ceilometer's,
+the fields must be interpolated onto the observation grid, and the wet-bulb
+temperature must be derived.
+
+\subsection{Grid alignment in absolute coordinates}
+
+Model height is measured above the model grid cell's surface; ceilometer range is
+measured above the instrument. In complex terrain the two reference surfaces can
+differ by hundreds of metres (e.g.\ $\sim$270\,m at Granada). Given the site
+altitude $a$ (m a.s.l.) and the model's own surface altitude $s_i$ at time step
+$i$ --- taken from \code{sfc\_height}, or from \code{sfc\_geopotential}$/g$ with
+$g = 9.80665\,\mathrm{m\,s^{-2}}$ --- the per-step correction is
+%
+\begin{equation}
+  c_i = s_i - a ,
+\end{equation}
+%
+and each model profile is queried at $z - c_i$ rather than at $z$, placing both
+grids in absolute (above-sea-level) coordinates. When either altitude is unknown,
+$c_i = 0$ and both grids are treated as height-above-ground.
+
+\subsection{Interpolation, then wet-bulb (order matters)}
+
+Each kept model profile is interpolated onto the observation range by linear
+interpolation that \emph{extrapolates} beyond the model levels rather than
+clamping (\code{interp\_extrap}, matching
+\code{scipy}'s \code{fill\_value="extrapolate"}), so a site sitting below the
+lowest model level still receives a sensible near-ground value. The result is
+then interpolated along time (clamped at the temporal edges).
+
+Wet-bulb temperature is computed \emph{from the already-interpolated} $T$, $p$,
+$q$, via \code{atmoslib} (falling back to dry-bulb if unavailable). This ordering
+matches CloudnetPy and matters because wet-bulb is nonlinear in its inputs:
+interpolating a wet-bulb field built on the coarse model grid would not equal the
+wet-bulb of the interpolated fields. The solve is restricted to gates with
+$p > 1000\,\mathrm{Pa}$ to guard the extrapolated near-vacuum gates above the
+model top.
+
+A model time step with no finite temperature/height values (occasionally seen in
+HARMONIE files) is dropped and bridged by the time interpolation, rather than
+failing the whole classification.
+
+\subsection{The extrapolated (quality) flag}
+
+The returned \code{Model} carries a boolean \code{extrapolated} field, true where
+$T_w$ was clamped or extrapolated --- either above the model top or outside the
+model's temporal coverage. This is surfaced downstream as the \code{quality}
+field of the classification, flagging lower-confidence pixels.
+
+\subsection{The freezing level \texorpdfstring{$\Tzero$}{T0}}
+\label{sec:t0}
+
+The single most important model-derived quantity is the altitude of the
+$0\,\degc$ isotherm, computed per profile by \code{\_find\_t0\_alt}. Given two
+adjacent gates $a, b$ that straddle \Tzero{}, the crossing altitude is the linear
+interpolation
+%
+\begin{equation}
+  z_{\Tzero} = z_a + (\Tzero - T_w[a])\,\frac{z_b - z_a}{T_w[b] - T_w[a]} .
+  \label{eq:t0}
+\end{equation}
+%
+\textbf{Which crossing is chosen is a deliberate divergence from CloudnetPy.}
+CloudnetPy always takes the lowest \Tzero{} crossing. \code{ceiloclass} instead:
+\begin{itemize}[nosep]
+  \item with a \emph{warm surface} ($T_w[0] \ge \Tzero$, the usual case) takes the
+        \emph{lowest} crossing (gates $a=j-1$, $b=j$ with $j$ the lowest cold
+        gate), so the boundary tracks the melting level smoothly even through
+        warm--cold--warm layering aloft;
+  \item with a \emph{sub-freezing surface} --- a winter surface inversion --- takes
+        the \emph{topmost} crossing (gates $a=j$, $b=j+1$ with $j$ the highest
+        warm gate). The lowest crossing would otherwise collapse to the ground and
+        mislabel the entire warm column above the inversion as ice.
+\end{itemize}
+Everything above $z_{\Tzero}$ is the \emph{freezing region}
+(\code{find\_freezing\_region}): the candidate domain for ice and supercooled
+liquid.
+
+%======================================================================
+\section{Detection primitives}
+\label{sec:detect}
+%======================================================================
+
+Each function in \code{detection.py} is a pure boolean mask over the grid, ported
+from CloudnetPy and restricted to the radar-free signal. They are composed by
+\code{classify} (Section~\ref{sec:classify}).
+
+\subsection{Liquid droplet layers}
+\label{sec:liquid}
+
+\code{find\_liquid} detects liquid layers from the \emph{shape} of the
+backscatter profile: a liquid cloud base produces a sharp peak with a strong
+gradient above it (the lidar is rapidly attenuated inside the droplets). The
+algorithm is CloudnetPy's \code{droplet.find\_liquid} minus the
+liquid-water-path and radar top-correction steps (no radiometer/radar):
+
+\begin{enumerate}[nosep]
+  \item Find strict local maxima of $\beta$ along range (\code{local\_maxima},
+        comparing $\pm 4$ neighbours) exceeding a peak amplitude
+        $\beta_{\mathrm{peak}} = 10^{-6}\,\betau$.
+  \item For each peak, walk down to a \emph{base} and up to a \emph{top} using the
+        backscatter difference profile, searching at most $200\,\mathrm{m}$ below
+        and $150\,\mathrm{m}$ above.
+  \item Accept the peak as liquid (\code{\_is\_valid\_peak}) only if it has at
+        least $3$ non-zero gates, a thickness $< 250\,\mathrm{m}$, a peak altitude
+        $\ge 100\,\mathrm{m}$ above the lowest gate, and a top gradient
+        \[
+          \frac{\beta[\text{peak}] - \beta[\text{top}]}
+               {z[\text{top}] - z[\text{peak}]} > 10^{-7} .
+        \]
+\end{enumerate}
+
+\paragraph{Surface pass (extension beyond CloudnetPy).}
+A strict local maximum can never fall within \code{order} gates of a profile
+edge, so the lowest $2\times 4 = 8$ gates form a \emph{blind zone}. Fog and very
+low stratus peaking there would be invisible to the main search and fall through
+to aerosol. A second pass therefore takes the strongest gate in the blind zone,
+anchors the base at the ground, walks the top upward as usual, and applies the
+same validity test with the minimum-altitude criterion relaxed (liquid sitting on
+the ground by definition).
+
+\subsection{Cold elevated signal (falling ice)}
+\label{sec:falling}
+
+\code{find\_falling} is the lidar-only branch of CloudnetPy's falling-hydrometeor
+detection: backscatter present in cold air is treated as ice. A pixel is
+\emph{falling} when it carries signal, lies above $2000\,\mathrm{m}$, and is
+colder than $\mathrm{COLD\_LIMIT} = \Tzero - 15 = -15\,\degc$. Above
+$4000\,\mathrm{m}$ an \emph{isolated} single gate (fewer than two signal gates in
+a $\pm 3$-gate window) is dropped, to avoid mislabelling thin aerosol as ice.
+
+\subsection{Depolarization ice (CL61 only)}
+\label{sec:depolice}
+
+On the CL61, linear depolarization gives directly what CloudnetPy otherwise gets
+from radar. \code{find\_depol\_ice} marks every signal pixel whose depolarization
+exceeds $\mathrm{ICE\_DEPOL\_LIMIT} = 0.15$ as ice:
+%
+\begin{equation}
+  \mathrm{ice\_like} = \neg\,\mathrm{mask}(\beta)\ \wedge\ (\delta > 0.15).
+\end{equation}
+%
+Liquid droplets are spherical and barely depolarize ($\delta < 0.1$); ice
+crystals are non-spherical and depolarize strongly ($\delta \sim 0.3$--$0.5$). The
+threshold sits between the two populations. This both vetoes \code{find\_liquid}
+false positives (ice virga read as a droplet layer) and recovers ice that
+\code{find\_falling} misses below its altitude/temperature cutoffs.
+
+\subsection{Growing and filling liquid layers}
+\label{sec:grow}
+
+\code{find\_liquid} marks only the sharp core of a layer; the weaker gates hugging
+its base and top are still cloud but fall outside the gradient bounds. Two
+operators absorb them:
+
+\begin{description}[style=nextline, leftmargin=1.2em, nosep]
+  \item[\code{grow\_liquid}] dilates the droplet mask along range into adjacent
+        gates that carry signal and are not \emph{blocked} (ice). Growth is
+        \emph{asymmetric}: generous upward ($100\,\mathrm{m}$, to recover the
+        attenuated true top), minimal downward ($10\,\mathrm{m}$, to avoid
+        swallowing sub-cloud aerosol/drizzle). Distances are converted to gate
+        counts for the instrument's resolution.
+  \item[\code{fill\_thin\_clouds}] relabels a \emph{whole} contiguous signal run
+        as liquid when it contains a droplet gate and is no thicker than
+        $100\,\mathrm{m}$. Thicker runs (a cloud over a deep aerosol column) are
+        left alone so genuine aerosol below the cloud is not absorbed.
+\end{description}
+
+\subsection{Supercooled limit}
+
+\code{correct\_supercooled} removes droplet gates colder than
+$\mathrm{SUPERCOOLED\_LIMIT} = \Tzero - 38 = -38\,\degc$, below which liquid water
+cannot exist.
+
+%======================================================================
+\section{The adaptive backscatter threshold}
+\label{sec:threshold}
+%======================================================================
+
+The pivotal decision in radar-free classification is: \emph{how bright must
+signal be to count as cloud/precipitation rather than aerosol?} A fixed threshold
+fails because aerosol load varies enormously by site and day (a dusty Granada
+afternoon vs.\ a clean Arctic morning). \code{\_adaptive\_strong\_beta} therefore
+derives the threshold $\beta_{\mathrm{strong}}$ from the data distribution itself.
+This is the second major divergence from CloudnetPy.
+
+Ceilometer backscatter has a low-value aerosol/background mode; cloud and
+precipitation form either a weaker high tail or a distinct second, higher mode.
+The algorithm:
+
+\begin{enumerate}[nosep]
+  \item Histogram $\log \beta$ over the $1$st--$99.9$th percentile range in $60$
+        bins (using the \emph{whole} column, so cloud aloft remains in the
+        distribution), and lightly smooth the counts.
+  \item \textbf{Anchor on the aerosol mode}: the \emph{lowest} prominent peak, not
+        necessarily the tallest --- on a cloudy day the cloud mode can out-count
+        the aerosol mode. A lower peak is preferred over the tallest only when a
+        genuine valley (counts dropping to $\le 0.5\times$ the lower peak)
+        separates them, rejecting mere noise bumps on the rising edge.
+  \item \textbf{Place the threshold} past the anchor:
+        \begin{itemize}[nosep]
+          \item if a higher \emph{cloud-bright} mode exists --- one both $>2\times$
+                the aerosol value \emph{and} above
+                $\mathrm{min\_cloud\_beta} = 3\times10^{-6}\,\betau$ --- at the
+                \emph{valley} (minimum count) between the two modes. (A second mode
+                still at aerosol-level backscatter is layered aerosol, e.g.\ lofted
+                Saharan dust, not cloud, and must not be split off as drizzle.)
+          \item otherwise at the aerosol mode's right \emph{shoulder}, where the
+                count first falls below $5\%$ of the peak (anchored on the highest
+                aerosol mode, so a secondary aerosol layer stays below the
+                threshold).
+        \end{itemize}
+  \item \textbf{Cap} the result at $25\times$ the anchor peak value and at the
+        absolute ceiling $\mathrm{max\_strong\_beta} = 10^{-5}\,\betau$. The
+        absolute cap matters in a polar-winter continuum of low cloud, where the
+        anchor can land on the cloud mode and the threshold would otherwise run
+        off: aerosol backscatter does not physically exceed
+        $\sim 10^{-5}\,\betau$, so anything above that is cloud.
+\end{enumerate}
+
+The threshold can be overridden by passing \code{strong\_beta=} to
+\code{classify}; the default $3\times10^{-6}\,\betau$ is returned only when there
+are too few samples ($<1000$).
+
+%======================================================================
+\section{Classification assembly}
+\label{sec:classify}
+%======================================================================
+
+\code{classify(ceilo, model)} composes the primitives into the final category
+grid. The skeleton, ignoring depolarization for a moment, is:
+
+\begin{enumerate}[nosep]
+  \item Compute the freezing region (Section~\ref{sec:t0}) and the liquid layers
+        (Section~\ref{sec:liquid}); grow and fill them
+        (Section~\ref{sec:grow}); apply the supercooled limit.
+  \item Pick $\beta_{\mathrm{strong}}$ (Section~\ref{sec:threshold}).
+  \item Mark \emph{bright} signal: $\neg\,\mathrm{mask}(\beta) \wedge
+        (\beta > \beta_{\mathrm{strong}})$. \emph{Strong} signal is bright and
+        non-droplet.
+  \item \textbf{Ice} $=$ strong signal in the freezing region.
+        \textbf{Drizzle/rain} $=$ strong signal in the warm region (below
+        \Tzero), gated on a source above it (Section~\ref{sec:source}).
+        \textbf{Aerosol} $=$ any remaining signal.
+  \item Assemble category codes (Section~\ref{sec:assemble}) and despeckle.
+\end{enumerate}
+
+\subsection{Depolarization refinements (CL61 only)}
+
+When depolarization is available, \code{ice\_like} (Section~\ref{sec:depolice})
+sharpens three things:
+
+\paragraph{(a) Multiple-scattering tail.}
+\emph{Inside} a liquid layer, depolarization climbs from multiple scattering and
+would falsely trip the ice veto, carving out the densest part of a real droplet
+cloud. Genuine liquid layers are identified (they contain a low-depol
+single-scattering part that pure ice lacks) and shielded --- the whole layer plus
+a short tail of $\mathrm{MS\_TAIL} = 80\,\mathrm{m}$ above it (the
+$\sim$90th-percentile observed tail) --- from the veto. With depolarization
+available, \code{ice\_like} also \emph{replaces} \code{find\_falling}'s
+$-15\,\degc / 2000\,\mathrm{m}$ heuristic as the barrier to liquid growth, so a
+genuine high-altitude supercooled cloud top (e.g.\ at Troll) is not clipped.
+
+\paragraph{(b) Extending the freezing region down to observed ice.}
+A model \Tzero{} level biased \emph{high} leaves depol-confirmed ice on its warm
+side (falling ice not yet melted). \code{\_extend\_cold\_to\_ice} floods the
+freezing region \emph{downward} through contiguous \emph{cloud-strength}
+\code{ice\_like} gates --- but no more than $\mathrm{max\_depth} = 1500\,\mathrm{m}$
+below the original boundary, so lofted dust touching cloud cannot drag the whole
+column sub-freezing. Only cloud-strength ice ($\beta > \beta_{\mathrm{strong}}$)
+floods, since a daytime boundary layer can be full of weakly-backscattering yet
+strongly-depolarizing aerosol (dust, pollen). The new ice base is then smoothed
+against noisy single-profile pillars: the per-profile base height is replaced by
+its rolling median over $\pm 10$ profiles and the extension clipped to it. Keying
+on the base being an outlier (rather than on a profile count) makes it insensitive
+to time averaging and to clustered pillars.
+
+\paragraph{(c) The melt band (extending rain up to observed ice).}
+The symmetric counterpart: when a depol-ice base sits \emph{above} the model
+\Tzero, the real melting level is higher than the model's, and the cold (per the
+model), cloud-strength, low-depol band between them is ice \emph{melting into
+rain}, not ice. \code{\_melt\_band\_below\_ice} marks the band as the
+cloud-strength signal reachable \emph{both} downward from the depol ice base
+\emph{and} upward from the warm region --- a continuous column linking the ice
+down to the rain across the melting level. Requiring both ends excludes low-depol
+patches buried inside an ice cloud and supercooled layers with no ice above them.
+Because the melting layer itself depolarizes (wet, irregular particles), a
+\emph{thin} ($\le 150\,\mathrm{m}$) high-depol enhancement at the melt level is
+bridged rather than allowed to block, while a thick coherent ice cloud still
+blocks. The band is then dropped from the freezing region, so it classifies as
+drizzle/rain.
+
+\subsection{The drizzle source gate}
+\label{sec:source}
+
+Drizzle and rain fall \emph{from} a cloud: precipitation and its parent cloud form
+one contiguous signal column. \code{\_source\_connected} keeps a warm bright gate
+as drizzle/rain only when a cloud gate (liquid layer or ice) lies \emph{above} it
+and every gate between carries signal. This rejects two false sources:
+\begin{itemize}[nosep]
+  \item a bright layer separated from anything above by clear air (e.g.\ a
+        near-surface aerosol blob far below an unrelated cirrus --- the path is
+        broken);
+  \item a cloud \emph{below} the layer (e.g.\ haze sitting above a shallow surface
+        fog --- the cloud is not above it). This is what keeps the cloud-free
+        bright marine haze at Mindelo classified as aerosol, not drizzle.
+\end{itemize}
+The cloud mask may first be dilated by $\pm\,$\code{drizzle\_source\_window}
+profiles in time, so a single-profile gap at a ragged cloud edge does not drop a
+genuine drizzle shaft beside it. The default window is $0$ (source required in the
+same profile); a negative value disables the gate entirely.
+
+\subsection{Category precedence and despeckling}
+\label{sec:assemble}
+
+\code{\_assemble} writes the category codes with later rules overwriting earlier
+ones, encoding the precedence ``liquid layers sit on top'':
+%
+\begin{center}
+\small
+aerosol $\rightarrow$ ice $\rightarrow$ drizzle/rain $\rightarrow$
+droplet (warm) $\rightarrow$ supercooled (droplet $\wedge$ cold).
+\end{center}
+%
+Finally \code{\_despeckle} clears any classified pixel with fewer than
+\code{speckle\_min} (default $3$) classified pixels in its $3\times3$
+neighbourhood, removing isolated specks left by screening noise. It is computed
+efficiently with a 2-D summed-area (integral-image) table.
+
+%======================================================================
+\section{Output categories}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}c l l@{}}
+\toprule
+Code & Category & Definition \\
+\midrule
+0 & \target{Clear}          & No signal, or speckle removed. \\
+1 & \target{Droplet}        & Liquid layer in warm air ($T_w \ge \Tzero$). \\
+2 & \target{Drizzle/Rain}   & Strong warm signal sourced from a cloud above. \\
+3 & \target{Ice}            & Strong (or depol-confirmed) signal in cold air. \\
+4 & \target{Supercooled}    & Liquid layer in cold air ($T_w < \Tzero$). \\
+5 & \target{Aerosol}        & Any remaining signal below the cloud threshold. \\
+\bottomrule
+\end{tabular}
+\caption{The \target{Target} enumeration. There is no melting class: the freezing
+anchor (Sections~\ref{sec:t0} and \ref{sec:classify}) already places the ice/rain
+boundary at the observed melt level.}
+\end{table}
+
+%======================================================================
+\section{Summary of divergences from CloudnetPy}
+%======================================================================
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}p{0.27\linewidth} p{0.32\linewidth} p{0.32\linewidth}@{}}
+\toprule
+Aspect & CloudnetPy & \code{ceiloclass} \\
+\midrule
+Freezing level &
+  Always the lowest \Tzero{} crossing &
+  Top-most crossing under a sub-freezing surface inversion
+  (Section~\ref{sec:t0}). \\
+Cloud/aerosol threshold &
+  Effectively fixed &
+  Data-adaptive from the backscatter histogram, capped at $10^{-5}\,\betau$
+  (Section~\ref{sec:threshold}). \\
+Phase information &
+  From cloud radar &
+  From CL61 depolarization; absent for other instruments
+  (Section~\ref{sec:depolice}). \\
+Ice/rain boundary &
+  Model melting level &
+  Anchored to observed depol ice via \code{\_extend\_cold\_to\_ice} and the melt
+  band (Section~\ref{sec:classify}). \\
+Fog / very low stratus &
+  --- &
+  Dedicated surface pass into the local-maximum blind zone
+  (Section~\ref{sec:liquid}). \\
+\bottomrule
+\end{tabular}
+\caption{Where the radar-free port deliberately departs from CloudnetPy.}
+\end{table}
+
+%======================================================================
+\section{Limitations}
+%======================================================================
+
+\begin{itemize}[nosep]
+  \item Without radar, phase for non-CL61 instruments rests entirely on the model
+        temperature and backscatter shape; the freezing region is a model
+        quantity and inherits its biases (mitigated, on the CL61, by the
+        depol-anchored boundary).
+  \item The lidar is rapidly attenuated inside thick liquid; nothing can be said
+        about cloud above an optically thick base.
+  \item The adaptive threshold assumes a recognizable aerosol mode; in a
+        featureless distribution it falls back to fixed defaults and caps.
+  \item There is no melting-layer or insect class, and no liquid-water-path
+        constraint (no radiometer).
+\end{itemize}
+
+%======================================================================
+\section*{Compiling this document}
+\addcontentsline{toc}{section}{Compiling this document}
+%======================================================================
+
+\begin{verbatim}
+pdflatex whitepaper.tex
+pdflatex whitepaper.tex   # second pass for the table of contents / refs
+\end{verbatim}
+\noindent
+Only standard TeX Live packages are used (\code{amsmath}, \code{booktabs},
+\code{tikz}, \code{hyperref}).
+
+\end{document}
