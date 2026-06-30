@@ -86,6 +86,7 @@ def find_liquid(
     min_top_der: float = 1e-7,
     min_alt: float = 100,
     surface_pass: bool = True,
+    strong_beta: float | None = None,
 ) -> npt.NDArray[np.bool_]:
     """Detect liquid droplet layers from attenuated backscatter.
 
@@ -108,6 +109,12 @@ def find_liquid(
             overlap correction is unreliable, where a distorted backscatter peak
             in the first gates would otherwise be flagged as a spurious surface
             liquid layer.
+        strong_beta: Cloud/aerosol backscatter threshold (sr-1 m-1). When given,
+            a layer's base is raised to its lowest cloud-strength gate, and a peak
+            that never reaches cloud strength is rejected: `_ind_base` follows a
+            gradual sub-cloud aerosol gradient down to its window limit, which on a
+            hazy day stretches the base ~200 m into aerosol (and can flag a weak
+            haze bump, whose whole "layer" is below the threshold, as liquid).
 
     Returns:
         Boolean array, True in liquid layers.
@@ -133,7 +140,9 @@ def find_liquid(
         if _is_valid_peak(
             lprof, height, base, peak, top, max_width, min_points, min_top_der, min_alt
         ):
-            is_liquid[n, base : top + 1] = True
+            trimmed = _trim_base_to_strong(lprof, base, peak, strong_beta)
+            if trimmed is not None:
+                is_liquid[n, trimmed : top + 1] = True
 
     # Surface pass: a fog / very-low-stratus layer peaking within the lowest
     # `2 * _PEAK_ORDER` gates is invisible to `local_maxima` (an edge gate is
@@ -167,7 +176,9 @@ def find_liquid(
                 min_top_der,
                 min_alt=0,
             ):
-                is_liquid[n, : top + 1] = True
+                trimmed = _trim_base_to_strong(lprof, 0, peak, strong_beta)
+                if trimmed is not None:
+                    is_liquid[n, trimmed : top + 1] = True
     return is_liquid
 
 
@@ -402,6 +413,25 @@ def correct_supercooled(
 ) -> npt.NDArray[np.bool_]:
     """Remove liquid droplets colder than the supercooled limit (-38 degC)."""
     return droplet & (tw >= t_limit)
+
+
+def _trim_base_to_strong(
+    lprof: npt.NDArray[np.floating], base: int, peak: int, strong_beta: float | None
+) -> int | None:
+    """Raise a liquid base to the lowest cloud-strength gate below the peak.
+
+    `_ind_base` follows a gradual sub-cloud aerosol gradient down to its window
+    limit, stretching the base into haze. Keep only the part of the base from the
+    peak down that reaches cloud strength (`strong_beta`); return `None` when the
+    peak itself never does, so a sub-threshold haze bump is not a liquid layer. A
+    no-op (returns `base`) when `strong_beta` is not given.
+    """
+    if strong_beta is None:
+        return base
+    strong = np.nonzero(lprof[base : peak + 1] >= strong_beta)[0]
+    if strong.size == 0:
+        return None
+    return base + int(strong[0])
 
 
 def _ind_base(dprof: npt.NDArray, ind_peak: int, dist: int, lim: float) -> int:

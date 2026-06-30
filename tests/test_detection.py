@@ -82,6 +82,39 @@ def test_find_liquid_rejects_wide_layer():
     assert not find_liquid(beta, height).any()
 
 
+def _haze_ramp_layer(peak=5e-6):
+    # A gradual sub-cloud aerosol ramp (gates 90-99) rising into a sharp-topped
+    # peak at gate 100, as on a hazy day. `_ind_base` follows the ramp's gentle
+    # gradient down, stretching the base into the sub-cloud haze.
+    profile = np.zeros(300)  # 15 m gates, as on chm15k
+    profile[90:101] = np.linspace(2e-6, peak, 11)
+    profile[101:103] = [1e-6, 3e-7]
+    return ma.array(np.tile(profile, (4, 1)))
+
+
+def test_find_liquid_trims_base_to_cloud_strength():
+    # With strong_beta the over-deep base (into sub-cloud haze) is raised to the
+    # layer's lowest cloud-strength gate; the peak itself stays liquid.
+    height = np.arange(300) * 15.0
+    beta = _haze_ramp_layer(peak=5e-6)  # peak above the 4e-6 threshold
+    loose = find_liquid(height=height, beta=beta)
+    tight = find_liquid(height=height, beta=beta, strong_beta=4e-6)
+    assert loose[:, 100].all() and tight[:, 100].all()  # peak liquid either way
+    loose_base = int(np.argmax(loose[0]))
+    tight_base = int(np.argmax(tight[0]))
+    assert tight_base > loose_base  # base lifted out of the haze ramp
+    assert (ma.filled(beta, 0)[0, loose_base:tight_base] < 4e-6).all()  # trimmed haze
+
+
+def test_find_liquid_rejects_layer_below_cloud_strength():
+    # A weak haze bump whose whole "layer" stays below strong_beta is not liquid:
+    # without the threshold it is wrongly detected; with it, it is rejected.
+    height = np.arange(300) * 15.0
+    beta = _haze_ramp_layer(peak=3.5e-6)  # peak below the 4e-6 threshold
+    assert find_liquid(height=height, beta=beta).any()  # peak_amp alone accepts it
+    assert not find_liquid(height=height, beta=beta, strong_beta=4e-6).any()
+
+
 def test_find_freezing_region_crossing():
     height = np.arange(100) * 100.0  # 0..9900 m
     tw = np.linspace(290, 240, 100)[np.newaxis, :].repeat(3, axis=0)

@@ -167,7 +167,9 @@ def classify(
 
     freezing = find_freezing_region(tw, height)
     cold = freezing
-    droplet = find_liquid(beta, height, surface_pass=find_surface_liquid)
+    droplet = find_liquid(
+        beta, height, surface_pass=find_surface_liquid, strong_beta=strong_beta
+    )
     # High-confidence ice, used only to stop liquid from growing into obvious ice.
     blocked = find_falling(beta, height, tw)
     ice_like = None
