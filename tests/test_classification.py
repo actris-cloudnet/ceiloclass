@@ -447,6 +447,61 @@ def test_classify_melt_band_below_ice_is_drizzle():
     assert (cls.target[:, 135] == Target.ICE).all()  # the depol-ice cap stays ice
 
 
+def test_classify_ice_rain_boundary_follows_depol_phase_change():
+    # A bright precipitation shaft crossing the model 0 degC line: solid ice above
+    # (depol ~0.45) melts into rain below, where depolarization drops to ~0.2 --
+    # still above the ice/liquid limit but well below the ice-core limit. The
+    # ice/rain boundary must follow that depol drop, not flood ice down through
+    # the still-depolarizing rain shaft below the melt.
+    n_time, n_height = 8, 200
+    gate = np.arange(n_height)
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 60:160] = 5e-5  # wide flat bright shaft (not a liquid layer)
+    depol = ma.zeros((n_time, n_height))
+    depol[:, 60:130] = 0.2  # melting / rain below t0: depol dropped, still > 0.15
+    depol[:, 130:160] = 0.45  # solid ice above t0
+    tw = np.tile(T0 + (130 - gate) * 0.1, (n_time, 1))  # 0 degC at gate 130
+    cls = classify(_synthetic_ceilo(beta, depol), _model(tw), strong_beta=1e-5)
+    assert (cls.target[:, 145] == Target.ICE).all()  # solid ice stays ice
+    # gate 100 is below the melt, depol 0.2 -> rain, not ice dragged down
+    assert not (cls.target[:, 100] == Target.ICE).any()
+    assert (cls.target[:, 100] == Target.DRIZZLE_OR_RAIN).all()
+
+
+def test_classify_extends_ice_through_solid_ice_below_model_t0():
+    # The legitimate case _extend_cold_to_ice exists for: the model 0 degC is
+    # biased high and real, solid ice (depol ~0.45) sits below it not yet melted.
+    # The ice-core depol gate must still let the freezing region flood down through
+    # it -- so this stays ice, in contrast to the dropped-depol rain shaft above.
+    n_time, n_height = 8, 200
+    gate = np.arange(n_height)
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 60:160] = 5e-5
+    depol = ma.zeros((n_time, n_height))
+    depol[:, 60:160] = 0.45  # solid ice all the way down (model t0 biased high)
+    tw = np.tile(T0 + (130 - gate) * 0.1, (n_time, 1))  # model 0 degC at gate 130
+    cls = classify(_synthetic_ceilo(beta, depol), _model(tw), strong_beta=1e-5)
+    assert (cls.target[:, 100] == Target.ICE).all()  # solid ice below t0 -> ice
+
+
+def test_classify_ice_core_limit_does_not_strip_cold_ice_above_t0():
+    # The ice-core (0.30) limit is for the DOWNWARD extension only. Above the 0 degC
+    # line a moderate depol (0.15-0.30) is still cold ice, not rain: a sub-freezing
+    # ice cloud at depol 0.2 must stay ICE, not be relabelled drizzle/rain. (Guards
+    # against keying the melt-band removal on the ice-core limit -- regression for
+    # the lindenberg-melting-above-t0 case.)
+    n_time, n_height = 8, 200
+    gate = np.arange(n_height)
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 120:160] = 5e-5  # bright cold cloud, entirely above t0
+    depol = ma.zeros((n_time, n_height))
+    depol[:, 120:160] = 0.2  # ice depol, below the ice-core limit but above 0.15
+    tw = np.tile(T0 + (100 - gate) * 0.1, (n_time, 1))  # 0 degC at gate 100
+    cls = classify(_synthetic_ceilo(beta, depol), _model(tw), strong_beta=1e-5)
+    assert (cls.target[:, 140] == Target.ICE).all()  # cold 0.2-depol cloud -> ice
+    assert not (cls.target[:, 120:160] == Target.DRIZZLE_OR_RAIN).any()
+
+
 def test_classify_cold_strong_signal_without_ice_above_stays_ice():
     # The same column with no depol ice cap: nothing seeds the band, so the cold
     # strong column stays ice (the boundary only moves where depol ice is above).

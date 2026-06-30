@@ -30,6 +30,18 @@ are non-spherical and depolarize strongly (depol ~ 0.3-0.5). The threshold sits
 between the two populations. Only the CL61 provides depolarization.
 """
 
+ICE_CORE_DEPOL_LIMIT = 0.30
+"""Depolarization marking solid ice rather than melting/wet hydrometeors.
+
+Across the melting level depolarization drops as ice turns to spherical drops:
+solid ice above sits at ~0.4-0.5, melting/light rain below at ~0.2. This higher
+threshold sits in that gap, between pristine ice and melting particles -- well
+above `ICE_DEPOL_LIMIT`, which only separates ice from liquid. It anchors the
+ice/rain boundary to the observed phase change (see `_extend_cold_to_ice`), so
+the freezing region floods down only through solid ice and stops at the melt,
+instead of running on through the still-depolarizing rain shaft below it.
+"""
+
 _PEAK_ORDER = 4
 """Neighbours compared each side when flagging a backscatter peak.
 

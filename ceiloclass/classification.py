@@ -18,6 +18,7 @@ from ceilopyter import Ceilo
 from numpy import ma
 
 from .detection import (
+    ICE_CORE_DEPOL_LIMIT,
     ICE_DEPOL_LIMIT,
     _fill_runs,
     _find_t0_alt,
@@ -192,11 +193,19 @@ def classify(
         # find_falling stays the barrier only for instruments without depol.
         blocked = ice_like
         # Anchor the freezing region to observed falling ice (see
-        # _extend_cold_to_ice), flooding only through CLOUD-STRENGTH ice: a daytime
-        # boundary layer can be full of weakly-backscattering yet strongly-
-        # depolarizing aerosol (dust, pollen) that would otherwise drag the
-        # freezing region to the ground.
-        strong_ice = ice_like & (ma.filled(beta, 0.0) > strong_beta)
+        # _extend_cold_to_ice), flooding only through CLOUD-STRENGTH, SOLID ice.
+        # Cloud-strength (beta > strong_beta) excludes a daytime boundary layer of
+        # weakly-backscattering yet strongly-depolarizing aerosol (dust, pollen).
+        # The ice-core depol limit (not the lower ice/liquid limit) marks SOLID
+        # ice: as ice falls past the melting level depolarization drops from solid
+        # ice ~0.4-0.5 to the ~0.2 of the wet/rain shaft below it. Flooding the
+        # freezing region down only through solid ice therefore STOPS at that phase
+        # change, instead of running on through the still-depolarizing rain below
+        # 0 degC (which would drag ice far into warm air). This higher limit is for
+        # the downward extension only: above the 0 degC line a 0.2 depol is still
+        # cold ice, not rain (see the melt-band block below).
+        ice_core = ice_like & (ma.filled(depol, 0.0) > ICE_CORE_DEPOL_LIMIT)
+        strong_ice = ice_core & (ma.filled(beta, 0.0) > strong_beta)
         cold = _extend_cold_to_ice(freezing, strong_ice, height)
     droplet = fill_thin_clouds(droplet, ~beta_mask, blocked, height)
     droplet = grow_liquid(droplet, ~beta_mask, blocked, height)
@@ -210,7 +219,11 @@ def classify(
         # the cold, cloud-strength, low-depol band between them is ice melting into
         # rain, not ice. Raise the ice/rain boundary to the observed ice base by
         # dropping that band from `cold`, so it classifies as drizzle/rain -- the
-        # symmetric counterpart of _extend_cold_to_ice. Keep any find_liquid
+        # symmetric counterpart of _extend_cold_to_ice. The band is keyed on the
+        # LOW ice/liquid depol limit, not the ice-core limit the downward extension
+        # uses: above the (biased-low) t0 the air is genuinely warm and the melted
+        # drops are near-spherical (depol < 0.15), whereas a 0.15-0.30 depol there
+        # is still ice and must not be stripped to rain. Keep any find_liquid
         # supercooled droplets (they have a real backscatter peak) as cold.
         melt_band = _melt_band_below_ice(ice_like, freezing, bright, height)
         cold = cold & ~(melt_band & ~droplet)
