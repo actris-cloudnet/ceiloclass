@@ -81,7 +81,11 @@ The output is a per-pixel \target{Target} category on the ceilometer
 $(\text{time}\times\text{range})$ grid. Reading and harmonizing raw instrument
 data is delegated to \code{ceilopyter}, which yields a \code{Ceilo} object
 exposing \code{time}, \code{range}, \code{beta} (screened backscatter, a masked
-array whose mask means ``no signal'') and, when available, \code{depol}.
+array whose mask means ``no signal'') and, when available, \code{depol}. The same
+pipeline runs unchanged on anything \code{ceilopyter} reads into a \code{Ceilo}:
+besides ceilometers, the harmonized PollyXT, DIAL (e.g.\ the Vaisala DA10) and
+doppler-lidar products, all carrying ceilometer-scale backscatter --- only the
+CL61 adds depolarization, so every other instrument takes the no-depol path.
 
 \paragraph{Notation.}
 Throughout, $\beta$ is the screened backscatter (\betau), $z$ the range above the
@@ -293,6 +297,19 @@ anchors the base at the ground, walks the top upward as usual, and applies the
 same validity test with the minimum-altitude criterion relaxed (liquid sitting on
 the ground by definition).
 
+\paragraph{Cloud-strength base (extension beyond CloudnetPy).}
+The base search follows the backscatter difference profile down to its
+$200\,\mathrm{m}$ window limit. On a hazy day the sub-cloud aerosol gradient is
+gradual, so the base is dragged $\sim$200\,m down into haze --- and \code{peak\_amp}
+($10^{-6}\,\betau$) sits far below the adaptive cloud threshold
+$\beta_{\mathrm{strong}}$, so a weak bump whose \emph{whole} layer stays below
+$\beta_{\mathrm{strong}}$ is even flagged as liquid. The base is therefore raised
+to the layer's lowest cloud-strength gate ($\beta \ge \beta_{\mathrm{strong}}$),
+and a peak that never reaches cloud strength is rejected outright. The bright cloud
+core is kept while the sub-cloud haze collapses back to aerosol; the
+\code{grow\_liquid}/\code{fill\_thin\_clouds} halo recovery (Section~\ref{sec:grow})
+still runs afterwards.
+
 \subsection{Cold elevated signal (falling ice)}
 \label{sec:falling}
 
@@ -469,17 +486,28 @@ genuine high-altitude supercooled cloud top (e.g.\ at Troll) is not clipped.
 \paragraph{(b) Extending the freezing region down to observed ice.}
 A model \Tzero{} level biased \emph{high} leaves depol-confirmed ice on its warm
 side (falling ice not yet melted). \code{\_extend\_cold\_to\_ice} floods the
-freezing region \emph{downward} through contiguous \emph{cloud-strength}
-\code{ice\_like} gates --- but no more than $\mathrm{max\_depth} = 1500\,\mathrm{m}$
-below the original boundary, so lofted dust touching cloud cannot drag the whole
-column sub-freezing. Only cloud-strength ice ($\beta > \beta_{\mathrm{strong}}$)
-floods, since a daytime boundary layer can be full of weakly-backscattering yet
-strongly-depolarizing aerosol (dust, pollen). The new ice base is then smoothed
-against noisy single-profile pillars: the per-profile base height is replaced by
-its rolling median over $\pm 10$ profiles and the extension clipped to it. Keying
-on the base being an outlier (rather than on a profile count) makes it insensitive
-to time averaging and to clustered pillars. Figure~\ref{fig:extendice} shows a
-CL61 case where this applies.
+freezing region \emph{downward} through contiguous \emph{solid-ice} gates --- but
+no more than $\mathrm{max\_depth} = 1500\,\mathrm{m}$ below the original boundary,
+so lofted dust touching cloud cannot drag the whole column sub-freezing. Two
+conditions gate the flood:
+\begin{enumerate}[nosep, label=(\roman*)]
+  \item \emph{Cloud strength} ($\beta > \beta_{\mathrm{strong}}$): a daytime
+        boundary layer can be full of weakly-backscattering yet strongly-
+        depolarizing aerosol (dust, pollen) that would otherwise reach the ground.
+  \item \emph{Solid-ice depolarization}
+        ($\delta > \mathrm{ICE\_CORE\_DEPOL\_LIMIT} = 0.30$, well above the $0.15$
+        ice/liquid limit of Section~\ref{sec:depolice}). Across the melting level
+        depolarization drops from solid ice ($\sim$0.4--0.5) to the $\sim$0.2 of
+        the wet/melting rain shaft below it, so the solid-ice base sits at that
+        drop. Requiring solid-ice depol stops the flood \emph{at the phase change}
+        rather than running on through the still-depolarizing rain below \Tzero{},
+        which would otherwise drag the ice region far into warm air.
+\end{enumerate}
+The new ice base is then smoothed against noisy single-profile pillars: the
+per-profile base height is replaced by its rolling median over $\pm 10$ profiles
+and the extension clipped to it. Keying on the base being an outlier (rather than
+on a profile count) makes it insensitive to time averaging and to clustered
+pillars. Figure~\ref{fig:extendice} shows a CL61 case where this applies.
 
 \begin{figure}[t]
 \centering
@@ -508,6 +536,13 @@ Because the melting layer itself depolarizes (wet, irregular particles), a
 bridged rather than allowed to block, while a thick coherent ice cloud still
 blocks. The band is then dropped from the freezing region, so it classifies as
 drizzle/rain. Figure~\ref{fig:meltband} shows this on a stratiform-rain day.
+
+Note the asymmetry with~(b): the downward extension keys on the solid-ice limit
+($0.30$), but the melt band keys on the \emph{low} ice/liquid limit ($0.15$).
+Above a biased-\emph{low} \Tzero{} the air is genuinely warm and the melted drops
+are near-spherical, so the rain there has $\delta < 0.15$; a $0.15$--$0.30$
+depolarization on the \emph{cold} side of \Tzero{} is still cold ice and must
+\emph{not} be stripped to rain, which a solid-ice threshold here would do.
 
 \begin{figure}[t]
 \centering
