@@ -478,7 +478,21 @@ strongly-depolarizing aerosol (dust, pollen). The new ice base is then smoothed
 against noisy single-profile pillars: the per-profile base height is replaced by
 its rolling median over $\pm 10$ profiles and the extension clipped to it. Keying
 on the base being an outlier (rather than on a profile count) makes it insensitive
-to time averaging and to clustered pillars.
+to time averaging and to clustered pillars. Figure~\ref{fig:extendice} shows a
+CL61 case where this applies.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{extend-ice-below-t0.png}
+\caption{\code{\_extend\_cold\_to\_ice} on a CL61 case (panels: screened
+backscatter, depolarization, target classification; dashed line is the model
+$0\,\degc$ level at $\sim$1.7\,km). The depolarization panel shows cloud-strength,
+strongly depolarizing ice reaching \emph{below} the model $0\,\degc$ line ---
+falling ice not yet melted, where the model freezing level is biased high. The
+classification extends the ice region down to that observed base rather than
+mislabelling the sub-\Tzero{} ice as drizzle/rain.}
+\label{fig:extendice}
+\end{figure}
 
 \paragraph{(c) The melt band (extending rain up to observed ice).}
 The symmetric counterpart: when a depol-ice base sits \emph{above} the model
@@ -493,7 +507,21 @@ Because the melting layer itself depolarizes (wet, irregular particles), a
 \emph{thin} ($\le 150\,\mathrm{m}$) high-depol enhancement at the melt level is
 bridged rather than allowed to block, while a thick coherent ice cloud still
 blocks. The band is then dropped from the freezing region, so it classifies as
-drizzle/rain.
+drizzle/rain. Figure~\ref{fig:meltband} shows this on a stratiform-rain day.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{extended-drizzle-above-t0.png}
+\caption{\code{\_melt\_band\_below\_ice} on a stratiform-rain CL61 day at
+Lindenberg (panels: screened backscatter, depolarization, target classification;
+dashed line is the model $0\,\degc$ level at $\sim$2.1\,km). The depol-ice base
+(strong depolarization above the low-depol rain) sits \emph{above} the model
+$0\,\degc$ line, so the real melt level is higher than the model's. The cold,
+cloud-strength, low-depol band between $\Tzero$ and the ice base is relabelled
+drizzle/rain --- the rain extends above the model $0\,\degc$ line up to the
+observed melt level.}
+\label{fig:meltband}
+\end{figure}
 
 \subsection{The drizzle source gate}
 \label{sec:source}
@@ -514,6 +542,23 @@ The cloud mask may first be dilated by $\pm\,$\code{drizzle\_source\_window}
 profiles in time, so a single-profile gap at a ragged cloud edge does not drop a
 genuine drizzle shaft beside it. The default window is $0$ (source required in the
 same profile); a negative value disables the gate entirely.
+
+\paragraph{Bridging the melting-layer notch.}
+Requiring \emph{strictly} continuous signal has a failure mode at the melting
+level. A melting layer produces a backscatter notch that frequently falls below
+the screening threshold, leaving a thin masked band between the rain below and the
+ice above --- and a single masked gate breaks the path, so the whole drizzle
+column beneath it loses its source and falls through to aerosol. The gate
+therefore bridges a clear-air run no longer than
+$\mathrm{DRIZZLE\_SOURCE\_MAX\_GAP} = 100\,\mathrm{m}$, bounded by signal on both
+sides, before tracing the path. This reconnects the drizzle across the screened
+melt notch while still rejecting the Mindelo case: a kilometre-scale clear gap has
+an unbridged core far longer than $100\,\mathrm{m}$, so its path stays broken. The
+distance is the discriminator the bare continuity test lacked --- a melt notch is
+tens of metres, an unrelated cirrus sits kilometres up. On a stratiform-rain CL61
+day at Lindenberg this recovers $\sim$6\,000 gates from aerosol to drizzle, of
+which $98\%$ are confirmed precipitation or melting by the co-located radar
+Cloudnet product (the same gates it had mislabelled aerosol).
 
 \subsection{Category precedence and despeckling}
 \label{sec:assemble}
