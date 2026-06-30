@@ -290,6 +290,39 @@ CASES: list[Case] = [
             Check("something is classified", Target.CLEAR, max_frac=0.999),
         ],
     ),
+    Case(
+        id="lindenberg-da10-dial",
+        site="lindenberg",
+        date="2026-06-17",
+        instrument="da10",
+        note="Instrument diversity: Vaisala DA10 DIAL via the harmonized lidar "
+        "product. Confirms a DIAL reads into a Ceilo and classifies on the same "
+        "thresholds (ceilometer-scale backscatter, no depolarization -> no-depol "
+        "path). High cirrus aloft is ice; an evening precip period gives liquid "
+        "with sub-cloud drizzle below it.",
+        checks=[
+            Check(
+                "high cirrus aloft is ice",
+                Target.ICE,
+                min_frac=0.02,
+                hours=(9.0, 18.0),
+                height_m=(4500, 8000),
+            ),
+            Check(
+                "the boundary layer is classified (as aerosol)",
+                Target.AEROSOL,
+                min_frac=0.30,
+                height_m=(0, 2000),
+            ),
+            Check(
+                "evening sub-cloud precipitation is drizzle/rain",
+                Target.DRIZZLE_OR_RAIN,
+                min_frac=0.05,
+                hours=(19.0, 24.0),
+                height_m=(0, 2500),
+            ),
+        ],
+    ),
 ]
 
 

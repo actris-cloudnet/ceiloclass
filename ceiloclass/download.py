@@ -101,8 +101,10 @@ def list_raw_sources(
 HARMONIZED_PRODUCTS = ("lidar", "doppler-lidar")
 """Cloudnet harmonized backscatter products read with `read_lidar`.
 
-`lidar` is ceilometers and PollyXT; `doppler-lidar` is the experimental HALO /
-WindCube backscatter product. Both expose the same `beta`/`beta_raw`.
+`lidar` is ceilometers, PollyXT and DIAL (e.g. the Vaisala DA10), all carrying
+ceilometer-scale attenuated backscatter; `doppler-lidar` is the experimental
+HALO / WindCube backscatter product. Both expose the same `beta`/`beta_raw`.
+A DIAL has no depolarization, so it classifies like a ceilometer without one.
 """
 
 
@@ -114,13 +116,13 @@ def list_harmonized_sources(
     """List the harmonized backscatter instruments available at a site and date.
 
     Searches every product in `HARMONIZED_PRODUCTS`, so a site's ceilometers,
-    PollyXT and doppler-lidars all appear together.
+    PollyXT, DIAL and doppler-lidars all appear together.
 
     Args:
         site_id: Cloudnet site identifier.
         date: Measurement date.
         instrument: Optional instrument-id substring to filter by, e.g. `"halo"`,
-            `"pollyxt"` or `"cl61"` (case-insensitive).
+            `"pollyxt"`, `"cl61"` or `"da10"` (case-insensitive).
 
     Returns:
         One `LidarSource` per distinct instrument, in portal order.

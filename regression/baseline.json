@@ -76,6 +76,23 @@
     "strong_beta": 1e-5,
     "t0_median": 1208.6
   },
+  "lindenberg-da10-dial": {
+    "checks": {
+      "evening sub-cloud precipitation is drizzle/rain": 0.17636,
+      "high cirrus aloft is ice": 0.07439,
+      "the boundary layer is classified (as aerosol)": 0.95309
+    },
+    "fractions": {
+      "AEROSOL": 0.13832,
+      "CLEAR": 0.82671,
+      "DRIZZLE_OR_RAIN": 0.00661,
+      "DROPLET": 0.00279,
+      "ICE": 0.02295,
+      "SUPERCOOLED": 0.00263
+    },
+    "strong_beta": 1.63e-6,
+    "t0_median": 2667.5
+  },
   "lindenberg-ice-flood": {
     "checks": {
       "no drizzle high inside the ice cloud (well above t0)": 0.0,
