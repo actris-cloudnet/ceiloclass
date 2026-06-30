@@ -86,6 +86,13 @@ def _add_arguments(p: argparse.ArgumentParser) -> None:
         "doppler-lidars) instead of raw instrument data",
     )
     p.add_argument(
+        "--no-rescreen",
+        action="store_true",
+        help="With --harmonized, classify the product's own screened beta instead of "
+        "re-screening beta_raw (the default). Cloudnet's screening is less aggressive, "
+        "so it keeps more weak/edge signal",
+    )
+    p.add_argument(
         "-m",
         "--model",
         help="Cloudnet model netCDF file, or a model id to fetch "
@@ -157,6 +164,8 @@ def _select_source(
 def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     reader: Callable[..., Ceilo]
     files: list[str | PathLike]
+    if args.no_rescreen and not args.harmonized:
+        parser.error("--no-rescreen only applies to --harmonized input")
     if args.files:
         # Local files: we can't introspect them, so the reader must be stated.
         if args.harmonized:
@@ -186,7 +195,9 @@ def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
             parser.error(f"no raw reader for instrument: {source.label}")
     else:
         parser.error("provide data files, or both --site and --date to fetch them")
-    ceilo: Ceilo = reader(files, args.calibration_factor)
+    # `rescreen` only exists on the harmonized reader; raw readers don't take it.
+    read_kwargs = {"rescreen": not args.no_rescreen} if args.harmonized else {}
+    ceilo: Ceilo = reader(files, args.calibration_factor, **read_kwargs)
 
     if args.average:
         ceilo = average_time(ceilo, args.average)
