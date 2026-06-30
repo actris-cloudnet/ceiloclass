@@ -59,6 +59,15 @@ def test_find_liquid_detects_surface_fog():
     assert not is_liquid[:, 10].any()  # but only the fog layer, not the column
 
 
+def test_find_liquid_surface_pass_can_be_disabled():
+    # The surface pass can be turned off (e.g. unreliable near-surface overlap):
+    # the blind-zone fog is then not detected, while the rest of the search runs.
+    height = np.arange(200) * 30.0
+    beta = _surface_fog()
+    assert find_liquid(beta, height)[:, 0].all()  # on by default
+    assert not find_liquid(beta, height, surface_pass=False).any()  # off -> nothing
+
+
 def test_find_liquid_rejects_weak_peak():
     height = np.arange(200) * 30.0
     beta = _liquid_layer(scale=0.1, center=40)  # peak below peak_amp 1e-6

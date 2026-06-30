@@ -93,6 +93,13 @@ def _add_arguments(p: argparse.ArgumentParser) -> None:
         "so it keeps more weak/edge signal",
     )
     p.add_argument(
+        "--no-surface-liquid",
+        action="store_true",
+        help="Do not detect fog / low stratus from the lowest range gates. Use when "
+        "the instrument's near-surface overlap correction is unreliable and produces "
+        "spurious surface liquid layers",
+    )
+    p.add_argument(
         "-m",
         "--model",
         help="Cloudnet model netCDF file, or a model id to fetch "
@@ -216,7 +223,9 @@ def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     if altitude is None and args.site:
         altitude = site_altitude(args.site)
 
-    result = classify(ceilo, model, altitude=altitude)
+    result = classify(
+        ceilo, model, altitude=altitude, find_surface_liquid=not args.no_surface_liquid
+    )
 
     total = result.target.size
     print(f"{result.target.shape[0]} profiles x {result.target.shape[1]} gates")

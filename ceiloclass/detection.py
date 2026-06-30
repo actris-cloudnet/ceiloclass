@@ -73,6 +73,7 @@ def find_liquid(
     min_points: int = 3,
     min_top_der: float = 1e-7,
     min_alt: float = 100,
+    surface_pass: bool = True,
 ) -> npt.NDArray[np.bool_]:
     """Detect liquid droplet layers from attenuated backscatter.
 
@@ -90,6 +91,11 @@ def find_liquid(
         min_top_der: Minimum backscatter gradient above the peak.
         min_alt: Minimum peak altitude above the lowest gate (m). Not applied to
             surface peaks, which are liquid sitting on the ground by definition.
+        surface_pass: Run the surface pass that recovers fog / very low stratus
+            from the lowest gates. Disable it on instruments whose near-surface
+            overlap correction is unreliable, where a distorted backscatter peak
+            in the first gates would otherwise be flagged as a spurious surface
+            liquid layer.
 
     Returns:
         Boolean array, True in liquid layers.
@@ -122,24 +128,34 @@ def find_liquid(
     # never a strict maximum), so the loop above finds nothing and the signal
     # would fall through to aerosol. Take the strongest gate in that blind zone,
     # anchor the base at the ground and walk the top upward as usual.
-    blind_zone = 2 * _PEAK_ORDER
-    for n in range(beta.shape[0]):
-        if is_liquid[n, :blind_zone].any():
-            continue
-        lprof = beta_filled[n]
-        if lprof[:blind_zone].max() <= peak_amp:
-            continue
-        peak = int(np.argmax(lprof[:blind_zone]))
-        try:
-            top = min(
-                _ind_top(beta_diff[n], peak, n_height, top_above_peak, 4), n_height - 1
-            )
-        except (IndexError, ValueError):
-            continue
-        if _is_valid_peak(
-            lprof, height, 0, peak, top, max_width, min_points, min_top_der, min_alt=0
-        ):
-            is_liquid[n, : top + 1] = True
+    if surface_pass:
+        blind_zone = 2 * _PEAK_ORDER
+        for n in range(beta.shape[0]):
+            if is_liquid[n, :blind_zone].any():
+                continue
+            lprof = beta_filled[n]
+            if lprof[:blind_zone].max() <= peak_amp:
+                continue
+            peak = int(np.argmax(lprof[:blind_zone]))
+            try:
+                top = min(
+                    _ind_top(beta_diff[n], peak, n_height, top_above_peak, 4),
+                    n_height - 1,
+                )
+            except (IndexError, ValueError):
+                continue
+            if _is_valid_peak(
+                lprof,
+                height,
+                0,
+                peak,
+                top,
+                max_width,
+                min_points,
+                min_top_der,
+                min_alt=0,
+            ):
+                is_liquid[n, : top + 1] = True
     return is_liquid
 
 

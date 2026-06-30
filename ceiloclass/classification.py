@@ -104,6 +104,7 @@ def classify(
     ice_depol_limit: float = ICE_DEPOL_LIMIT,
     ms_tail: float = MS_TAIL,
     drizzle_source_window: int = 0,
+    find_surface_liquid: bool = True,
 ) -> Classification:
     """Classify ceilometer targets: liquid layers + 0 degC line, rest aerosol.
 
@@ -139,6 +140,10 @@ def classify(
             it small: a wide window re-admits cloud-free bright aerosol as drizzle
             wherever a cloud passes within the window. A negative value disables
             the gate entirely (any bright warm signal is drizzle).
+        find_surface_liquid: Detect fog / low stratus from the lowest range gates
+            (the surface pass of `find_liquid`). Disable it when the instrument's
+            near-surface overlap correction is unreliable and would otherwise flag
+            a spurious surface liquid layer.
 
     Returns:
         A `Classification` on the ceilometer time/range grid.
@@ -161,7 +166,7 @@ def classify(
 
     freezing = find_freezing_region(tw, height)
     cold = freezing
-    droplet = find_liquid(beta, height)
+    droplet = find_liquid(beta, height, surface_pass=find_surface_liquid)
     # High-confidence ice, used only to stop liquid from growing into obvious ice.
     blocked = find_falling(beta, height, tw)
     ice_like = None
