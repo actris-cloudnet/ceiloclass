@@ -22,6 +22,7 @@ from .detection import (
     _fill_runs,
     _find_t0_alt,
     _iter_runs,
+    _n_elements,
     correct_supercooled,
     fill_thin_clouds,
     find_depol_ice,
@@ -40,6 +41,16 @@ Inside a liquid layer depolarization climbs from multiple scattering and falls
 back to the background just above the cloud; this is the height over which that
 elevated-depol tail is shielded from the ice veto. The default is the ~90th
 percentile of the tail observed across several CL61 days."""
+
+DRIZZLE_SOURCE_MAX_GAP = 100.0
+"""Clear-air gap a drizzle column may span to reach its cloud source (m).
+
+A melting layer has a backscatter notch that often falls below the screening
+threshold, leaving a thin masked band between the rain and the ice above it. The
+drizzle-source link (`_source_connected`) bridges clear gaps up to this distance
+so that notch does not sever a drizzle column from its cloud and drop it to
+aerosol. Stays well below the kilometre-scale clear air that must still reject an
+unconnected near-surface layer (e.g. Mindelo haze under a distant cirrus)."""
 
 
 class Target(IntEnum):
@@ -211,7 +222,12 @@ def classify(
     # Mindelo).
     rain = strong & ~cold
     if drizzle_source_window >= 0:
-        rain &= _source_connected(droplet | ice, signal, drizzle_source_window)
+        rain &= _source_connected(
+            droplet | ice,
+            signal,
+            drizzle_source_window,
+            max_gap=_n_elements(height, DRIZZLE_SOURCE_MAX_GAP),
+        )
     aerosol = signal & ~droplet & ~ice & ~rain
 
     target = _assemble(droplet, cold, ice, rain, aerosol)
@@ -360,8 +376,9 @@ def _source_connected(
     cloud: npt.NDArray[np.bool_],
     signal: npt.NDArray[np.bool_],
     time_window: int,
+    max_gap: int = 0,
 ) -> npt.NDArray[np.bool_]:
-    """Mark gates with a cloud ABOVE them, reachable through continuous signal.
+    """Mark gates with a cloud ABOVE them, reachable through (near-)continuous signal.
 
     Drizzle/rain hangs *below* its cloud: the precipitation and its source form
     one contiguous signal column with the cloud on top. A gate is "sourced" only
@@ -374,9 +391,13 @@ def _source_connected(
     - a cloud *below* the layer -- e.g. haze sitting above a shallow surface fog
       (the cloud is not above it).
 
-    The cloud mask is first dilated by +/-`time_window` profiles in time, so a
-    single-profile gap in cloud detection at a ragged cloud edge does not drop a
-    genuine drizzle shaft beside it.
+    A clear-air run no longer than `max_gap` gates, bounded by signal on both
+    sides, is bridged before the path is traced: a melting layer's backscatter
+    notch is often screened out, and that thin masked band must not sever a
+    drizzle column from the ice above it (a large clear gap, with a longer
+    unbridged core, is still broken). The cloud mask is first dilated by
+    +/-`time_window` profiles in time, so a single-profile gap in cloud detection
+    at a ragged cloud edge does not drop a genuine drizzle shaft beside it.
     """
     src = cloud
     for _ in range(max(time_window, 0)):
@@ -384,6 +405,13 @@ def _source_connected(
         grown[1:] |= src[:-1]
         grown[:-1] |= src[1:]
         src = grown
+    if max_gap > 0:
+        signal = signal.copy()
+        n_gate = signal.shape[1]
+        for i in range(signal.shape[0]):
+            for j, k in _iter_runs(~signal[i]):
+                if j > 0 and k < n_gate and k - j <= max_gap:
+                    signal[i, j:k] = True
     # Propagate "a cloud sits above, through unbroken signal" downward gate by
     # gate. Gate g inherits from the gate above (g+1) only when that gate carries
     # signal, so a clear-air gate breaks the path.

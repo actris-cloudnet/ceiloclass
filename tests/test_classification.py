@@ -12,6 +12,7 @@ from ceiloclass.classification import (
     _despeckle,
     _extend_cold_to_ice,
     _melt_band_below_ice,
+    _source_connected,
     _thin_runs,
     classify,
 )
@@ -512,6 +513,38 @@ def test_classify_bright_blob_below_disconnected_cirrus_is_aerosol():
     assert (cls.target[:, 151] == Target.ICE).all()  # the cirrus is ice
     assert (cls.target[:, 11] == Target.AEROSOL).all()  # blob not sourced by it
     assert not (cls.target[:, :120] == Target.DRIZZLE_OR_RAIN).any()
+
+
+def test_source_connected_bridges_small_gap_not_large():
+    # A thin clear gap (a screened melting-layer notch) between a column and the
+    # cloud above is bridged up to `max_gap` gates; a longer gap (Mindelo) is not.
+    signal = np.ones((1, 20), dtype=bool)
+    cloud = np.zeros((1, 20), dtype=bool)
+    cloud[0, 15] = True  # the source sits above the gap
+    signal[0, 8:11] = False  # 3-gate clear gap below the cloud
+    assert not _source_connected(cloud, signal, 0)[0, 5]  # default: gap breaks it
+    assert _source_connected(cloud, signal, 0, max_gap=3)[0, 5]  # bridged
+    signal[0, 8:13] = False  # widen to a 5-gate gap
+    assert not _source_connected(cloud, signal, 0, max_gap=3)[0, 5]  # too wide
+
+
+def test_classify_drizzle_bridges_thin_melt_gap():
+    # A drizzle column capped by depol ice, with a thin masked notch (the screened
+    # melting-layer backscatter minimum) between them: the notch must not sever the
+    # drizzle from its ice source and drop it to aerosol (the Lindenberg case).
+    n_time, n_height = 4, 200
+    gate = np.arange(n_height)
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 80:120] = 5e-5  # bright wide warm column (drizzle), below the notch
+    beta[:, 122:140] = 5e-5  # bright column above the notch, up to the ice
+    # gates 120:122 left masked = the screened melt notch (~60 m at 30 m gates)
+    depol = ma.zeros((n_time, n_height))
+    depol[:, 130:140] = 0.4  # depol ice cap on top
+    tw = np.tile(T0 + (128 - gate) * 0.1, (n_time, 1))  # 0 degC at gate 128
+    cls = classify(_synthetic_ceilo(beta, depol), _model(tw), strong_beta=1e-5)
+    assert (cls.target[:, 135] == Target.ICE).all()  # the depol-ice cap
+    assert (cls.target[:, 100] == Target.DRIZZLE_OR_RAIN).all()  # drizzle below notch
+    assert not (cls.target[:, 80:120] == Target.AEROSOL).any()
 
 
 def test_classify_weak_signal_is_aerosol():

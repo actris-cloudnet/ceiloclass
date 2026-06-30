@@ -4,9 +4,9 @@
       "something is classified": 0.7723
     },
     "fractions": {
-      "AEROSOL": 0.21385,
+      "AEROSOL": 0.21381,
       "CLEAR": 0.7723,
-      "DRIZZLE_OR_RAIN": 0.00266,
+      "DRIZZLE_OR_RAIN": 0.00271,
       "DROPLET": 0.00619,
       "ICE": 0.00217,
       "SUPERCOOLED": 0.00282
@@ -32,13 +32,13 @@
   },
   "granada-dust": {
     "checks": {
-      "aerosol is present": 0.11025,
-      "lofted dust is not drizzle": 0.00119
+      "aerosol is present": 0.11011,
+      "lofted dust is not drizzle": 0.00133
     },
     "fractions": {
-      "AEROSOL": 0.11025,
+      "AEROSOL": 0.11011,
       "CLEAR": 0.87349,
-      "DRIZZLE_OR_RAIN": 0.00119,
+      "DRIZZLE_OR_RAIN": 0.00133,
       "DROPLET": 0.00083,
       "ICE": 0.00654,
       "SUPERCOOLED": 0.0077
@@ -48,12 +48,12 @@
   },
   "kenttarova-drizzle": {
     "checks": {
-      "real sub-cloud drizzle is retained": 0.01275
+      "real sub-cloud drizzle is retained": 0.01305
     },
     "fractions": {
-      "AEROSOL": 0.04193,
+      "AEROSOL": 0.04164,
       "CLEAR": 0.90618,
-      "DRIZZLE_OR_RAIN": 0.01275,
+      "DRIZZLE_OR_RAIN": 0.01305,
       "DROPLET": 0.01009,
       "ICE": 0.02091,
       "SUPERCOOLED": 0.00813
@@ -82,9 +82,9 @@
       "no fake ice column in the warm boundary layer": 0.0
     },
     "fractions": {
-      "AEROSOL": 0.08974,
+      "AEROSOL": 0.08971,
       "CLEAR": 0.86146,
-      "DRIZZLE_OR_RAIN": 0.00125,
+      "DRIZZLE_OR_RAIN": 0.00128,
       "DROPLET": 0.00074,
       "ICE": 0.03649,
       "SUPERCOOLED": 0.01032
@@ -95,12 +95,12 @@
   "lindenberg-melting-above-t0": {
     "checks": {
       "ice no longer floods the band down to the model t0": 0.35963,
-      "the melt band below the ice base is drizzle/rain": 0.22934
+      "the melt band below the ice base is drizzle/rain": 0.2482
     },
     "fractions": {
-      "AEROSOL": 0.09877,
+      "AEROSOL": 0.09814,
       "CLEAR": 0.86622,
-      "DRIZZLE_OR_RAIN": 0.01199,
+      "DRIZZLE_OR_RAIN": 0.01261,
       "DROPLET": 0.00808,
       "ICE": 0.00817,
       "SUPERCOOLED": 0.00677
@@ -114,9 +114,9 @@
       "no spurious ice below the melting level": 0.0
     },
     "fractions": {
-      "AEROSOL": 0.03369,
+      "AEROSOL": 0.03364,
       "CLEAR": 0.94342,
-      "DRIZZLE_OR_RAIN": 0.00223,
+      "DRIZZLE_OR_RAIN": 0.00228,
       "DROPLET": 0.02066,
       "ICE": 0.0,
       "SUPERCOOLED": 0.0
@@ -143,12 +143,12 @@
   "nyalesund-cloudy-arctic": {
     "checks": {
       "liquid clouds are detected": 0.01966,
-      "sub-cloud drizzle is detected": 0.01206
+      "sub-cloud drizzle is detected": 0.01246
     },
     "fractions": {
-      "AEROSOL": 0.01976,
+      "AEROSOL": 0.01936,
       "CLEAR": 0.94375,
-      "DRIZZLE_OR_RAIN": 0.01206,
+      "DRIZZLE_OR_RAIN": 0.01246,
       "DROPLET": 0.01966,
       "ICE": 0.00097,
       "SUPERCOOLED": 0.0038
