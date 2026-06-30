@@ -42,7 +42,7 @@ this (data, manifest, plots) is gitignored.
 ## Adding a case
 
 Edit the `CASES` list in `run.py`: give it an `id`, `site`, `date`, an
-`instrument` id-substring (`cl61`, `chm15k`, `pollyxt`, `halo`, …), a `note`
+`instrument` id-substring (`cl61`, `chm15k`, `pollyxt`, `halo`, `da10`, …), a `note`
 describing _what makes it hard_, and `checks` encoding the physics. Then run
 `--update-baseline` to record its snapshot and commit the updated `baseline.json`.
 

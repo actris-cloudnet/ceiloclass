@@ -2,10 +2,11 @@
 
 Compute the 0 degC isotherm from the model and detect liquid droplet layers
 (split into warm `DROPLET` and sub-freezing `SUPERCOOLED` by the 0 degC level).
-Strong, non-liquid signal is cloud/precipitation -- `ICE` below the freezing
-level (anchored to observed ice, not just the model) and `DRIZZLE_OR_RAIN` above
-it. Every other signal-bearing pixel is `AEROSOL`. There is no melting class: the
-freezing anchor already places the ice/rain boundary at the observed melt.
+Strong, non-liquid signal is cloud/precipitation -- `ICE` above the freezing
+level (the sub-freezing air, anchored to observed ice, not just the model) and
+`DRIZZLE_OR_RAIN` below it. Every other signal-bearing pixel is `AEROSOL`. There
+is no melting class: the freezing anchor already places the ice/rain boundary at
+the observed melt.
 """
 
 from dataclasses import dataclass
