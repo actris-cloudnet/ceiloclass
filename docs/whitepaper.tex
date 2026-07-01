@@ -174,198 +174,160 @@ The modules map onto the stages of Figure~\ref{fig:pipeline}:
 \label{sec:model}
 %======================================================================
 
-The model provides temperature $T$, pressure $p$ and specific humidity $q$ on a
-coarse $(\text{time}\times\text{height})$ grid. Three things must happen before
-it can be used: the vertical coordinate must be reconciled with the ceilometer's,
-the fields must be interpolated onto the observation grid, and the wet-bulb
-temperature must be derived.
+The model supplies temperature, pressure and specific humidity on a coarse grid
+in time and height. Before these fields can inform the classification they must be
+brought onto the ceilometer's own grid, and the temperature must be converted to
+the wet-bulb temperature that governs the freezing level. Three considerations
+shape this step: the two instruments measure height from different reference
+surfaces, the interpolation must remain sensible near the ground, and the wet-bulb
+conversion is nonlinear and so must follow the interpolation rather than precede
+it.
 
 \subsection{Grid alignment in absolute coordinates}
 
-Model height is measured above the model grid cell's surface; ceilometer range is
-measured above the instrument. In complex terrain the two reference surfaces can
-differ by hundreds of metres (e.g.\ $\sim$270\,m at Granada). Given the site
-altitude $a$ (m a.s.l.) and the model's own surface altitude $s_i$ at time step
-$i$ --- taken from \code{sfc\_height}, or from \code{sfc\_geopotential}$/g$ with
-$g = 9.80665\,\mathrm{m\,s^{-2}}$ --- the per-step correction is
-%
-\begin{equation}
-  c_i = s_i - a ,
-\end{equation}
-%
-and each model profile is queried at $z - c_i$ rather than at $z$, placing both
-grids in absolute (above-sea-level) coordinates. When either altitude is unknown,
-$c_i = 0$ and both grids are treated as height-above-ground.
+The model reports height above the surface of its grid cell, while the ceilometer
+reports range above the instrument. In flat terrain the distinction is negligible,
+but where the model's representation of the surface departs from the true site
+altitude the two references can differ by hundreds of metres --- around 270\,m at
+Granada, for example. Using the known site altitude and the model's own surface
+altitude at each time step, both grids are shifted onto a common above-sea-level
+datum before interpolation, so that a given model temperature is placed at the
+height where the ceilometer actually samples it. Where either altitude is
+unavailable the correction is omitted and both grids are treated as height above
+ground, as CloudnetPy does.
 
-\subsection{Interpolation, then wet-bulb (order matters)}
+\subsection{Interpolation and wet-bulb temperature}
 
-Each kept model profile is interpolated onto the observation range by linear
-interpolation that \emph{extrapolates} beyond the model levels rather than
-clamping (\code{interp\_extrap}, matching
-\code{scipy}'s \code{fill\_value="extrapolate"}), so a site sitting below the
-lowest model level still receives a sensible near-ground value. The result is
-then interpolated along time (clamped at the temporal edges).
+Each model profile is interpolated onto the observation range and then along time.
+The vertical interpolation extrapolates beyond the model levels rather than
+holding the edge value fixed, so a site sitting below the lowest model level still
+receives a physically reasonable near-ground temperature; the temporal
+interpolation is clamped at the edges of the model's coverage.
 
-Wet-bulb temperature is computed \emph{from the already-interpolated} $T$, $p$,
-$q$, via \code{atmoslib} (falling back to dry-bulb if unavailable). This ordering
-matches CloudnetPy and matters because wet-bulb is nonlinear in its inputs:
-interpolating a wet-bulb field built on the coarse model grid would not equal the
-wet-bulb of the interpolated fields. The solve is restricted to gates with
-$p > 1000\,\mathrm{Pa}$ to guard the extrapolated near-vacuum gates above the
-model top.
-
-A model time step with no finite temperature/height values (occasionally seen in
-HARMONIE files) is dropped and bridged by the time interpolation, rather than
-failing the whole classification.
+The wet-bulb temperature is then derived from the already-interpolated
+temperature, pressure and humidity. This ordering follows CloudnetPy and matters
+because the wet-bulb temperature is nonlinear in its inputs: computing it on the
+coarse model grid and interpolating the result would not reproduce the wet-bulb
+temperature of the interpolated fields. Where the necessary thermodynamic library
+is unavailable the code falls back to the dry-bulb temperature. Occasionally a
+model time step carries no valid data; rather than abandoning the whole
+classification, such a step is dropped and bridged by the surrounding profiles in
+time.
 
 \subsection{The extrapolated (quality) flag}
 
-The returned \code{Model} carries a boolean \code{extrapolated} field, true where
-$T_w$ was extrapolated \emph{above the model top} or \emph{outside the model's
-temporal coverage}. Outside the model levels the value is not clamped but linearly
-extrapolated along the edge slope (\code{interp\_extrap}). Extrapolation
-\emph{below} the lowest model level is deliberately \emph{not} flagged --- in
-complex terrain a site can sit below the model surface, and the extrapolation
-there gives a sensible near-ground value. The flag is surfaced downstream as the
-\code{quality} field of the classification, marking lower-confidence pixels.
+The interpolated model carries a flag marking pixels whose wet-bulb temperature
+was extrapolated above the top of the model or outside its temporal coverage,
+where confidence is correspondingly lower. Extrapolation below the lowest model
+level is deliberately not flagged: in complex terrain a site can lie beneath the
+model surface, and the downward extrapolation there is trustworthy. This flag is
+passed through to the classification as its quality field.
 
 \subsection{The freezing level \texorpdfstring{$\Tzero$}{T0}}
 \label{sec:t0}
 
-The single most important model-derived quantity is the altitude of the
-$0\,\degc$ isotherm, computed per profile by \code{\_find\_t0\_alt}. Given two
-adjacent gates $a, b$ that straddle \Tzero{}, the crossing altitude is the linear
-interpolation
-%
-\begin{equation}
-  z_{\Tzero} = z_a + (\Tzero - T_w[a])\,\frac{z_b - z_a}{T_w[b] - T_w[a]} .
-  \label{eq:t0}
-\end{equation}
-%
-\textbf{Which crossing is chosen is a deliberate divergence from CloudnetPy.}
-CloudnetPy always takes the lowest \Tzero{} crossing. \code{ceiloclass} instead:
-\begin{itemize}[nosep]
-  \item with a \emph{warm surface} ($T_w[0] \ge \Tzero$, the usual case) takes the
-        \emph{lowest} crossing (gates $a=j-1$, $b=j$ with $j$ the lowest cold
-        gate), so the boundary tracks the melting level smoothly even through
-        warm--cold--warm layering aloft;
-  \item with a \emph{sub-freezing surface} --- a winter surface inversion --- takes
-        the \emph{topmost} crossing (gates $a=j$, $b=j+1$ with $j$ the highest
-        warm gate). The lowest crossing would otherwise collapse to the ground and
-        mislabel the entire warm column above the inversion as ice.
-\end{itemize}
-Everything above $z_{\Tzero}$ is the \emph{freezing region}
-(\code{find\_freezing\_region}): the candidate domain for ice and supercooled
-liquid.
+The single most important quantity derived from the model is the altitude of the
+$0\,\degc$ isotherm, obtained by linear interpolation between the two adjacent
+gates whose wet-bulb temperatures straddle \Tzero{}. Everything above this altitude
+is the \emph{freezing region}: the domain in which ice and supercooled liquid can
+occur.
+
+Which crossing to take, when the temperature profile passes through freezing more
+than once, is a deliberate departure from CloudnetPy, which always selects the
+lowest crossing. On a normal day with a warm surface \code{ceiloclass} likewise
+takes the lowest crossing, so that the freezing level tracks the melting layer
+smoothly even when warm and cold layers alternate aloft. But when the surface
+itself is below freezing --- a winter surface inversion --- it takes the topmost
+crossing instead. The lowest crossing would otherwise sit at the ground and
+mislabel the entire warm layer above the inversion as ice.
 
 %======================================================================
 \section{Detection primitives}
 \label{sec:detect}
 %======================================================================
 
-Each function in \code{detection.py} is a pure boolean mask over the grid, ported
-from CloudnetPy and restricted to the radar-free signal. They are composed by
-\code{classify} (Section~\ref{sec:classify}).
+The detection stage reduces the observations to a small set of physically
+motivated masks --- liquid layers, the freezing region, cold elevated ice, and (on
+the CL61) depolarization ice --- each ported from CloudnetPy and stripped to what a
+lidar alone can support. The classifier of Section~\ref{sec:classify} then
+composes these masks into the final categories. This section describes what each
+mask captures and the physical reasoning behind it.
 
 \subsection{Liquid droplet layers}
 \label{sec:liquid}
 
-\code{find\_liquid} detects liquid layers from the \emph{shape} of the
-backscatter profile: a liquid cloud base produces a sharp peak with a strong
-gradient above it (the lidar is rapidly attenuated inside the droplets). The
-algorithm is CloudnetPy's \code{droplet.find\_liquid} minus the
-liquid-water-path and radar top-correction steps (no radiometer/radar):
+A liquid cloud base has a characteristic backscatter signature: the return rises
+to a sharp peak and then falls away steeply above it, because the lidar is
+extinguished within a few tens of metres of entering the dense droplets. Liquid
+layers are found by locating such peaks along each profile and testing the shape
+around them. A candidate is accepted only if the peak is sufficiently bright
+(exceeding $10^{-6}\,\betau$), the layer is compact (thinner than
+$250\,\mathrm{m}$ and a few gates deep), it sits at least $100\,\mathrm{m}$ above
+the lowest gate, and the backscatter falls off sharply enough above the peak. The
+procedure follows CloudnetPy's liquid detection with the liquid-water-path and
+radar top-correction steps removed, since neither a radiometer nor a radar is
+available.
 
-\begin{enumerate}[nosep]
-  \item Find strict local maxima of $\beta$ along range (\code{local\_maxima},
-        comparing $\pm 4$ neighbours) exceeding a peak amplitude
-        $\beta_{\mathrm{peak}} = 10^{-6}\,\betau$.
-  \item For each peak, walk down to a \emph{base} and up to a \emph{top} using the
-        backscatter difference profile, searching at most $200\,\mathrm{m}$ below
-        and $150\,\mathrm{m}$ above.
-  \item Accept the peak as liquid (\code{\_is\_valid\_peak}) only if it has at
-        least $3$ non-zero gates, a thickness $< 250\,\mathrm{m}$, a peak altitude
-        $\ge 100\,\mathrm{m}$ above the lowest gate, and a top gradient
-        \[
-          \frac{\beta[\text{peak}] - \beta[\text{top}]}
-               {z[\text{top}] - z[\text{peak}]} > 10^{-7} .
-        \]
-\end{enumerate}
+Two refinements extend this beyond CloudnetPy. The first concerns fog and very low
+stratus. A strict local maximum cannot be found within a few gates of the profile
+edge, so the lowest several gates form a blind zone in which ground-hugging liquid
+would be missed and left as aerosol. A dedicated surface pass therefore takes the
+strongest return in this zone, anchors its base at the ground, and applies the
+same shape test with the minimum-altitude requirement relaxed, since fog by
+definition sits on the surface.
 
-\paragraph{Surface pass (extension beyond CloudnetPy).}
-A strict local maximum can never fall within \code{order} gates of a profile
-edge, so the lowest $2\times 4 = 8$ gates form a \emph{blind zone}. Fog and very
-low stratus peaking there would be invisible to the main search and fall through
-to aerosol. A second pass therefore takes the strongest gate in the blind zone,
-anchors the base at the ground, walks the top upward as usual, and applies the
-same validity test with the minimum-altitude criterion relaxed (liquid sitting on
-the ground by definition).
-
-\paragraph{Cloud-strength base (extension beyond CloudnetPy).}
-The base search follows the backscatter difference profile down to its
-$200\,\mathrm{m}$ window limit. On a hazy day the sub-cloud aerosol gradient is
-gradual, so the base is dragged $\sim$200\,m down into haze --- and \code{peak\_amp}
-($10^{-6}\,\betau$) sits far below the adaptive cloud threshold
-$\beta_{\mathrm{strong}}$, so a weak bump whose \emph{whole} layer stays below
-$\beta_{\mathrm{strong}}$ is even flagged as liquid. The base is therefore raised
-to the layer's lowest cloud-strength gate ($\beta \ge \beta_{\mathrm{strong}}$),
-and a peak that never reaches cloud strength is rejected outright. The bright cloud
-core is kept while the sub-cloud haze collapses back to aerosol; the
-\code{grow\_liquid}/\code{fill\_thin\_clouds} halo recovery (Section~\ref{sec:grow})
-still runs afterwards.
+The second refinement guards against dragging a liquid base down into haze.
+Because the base search follows the backscatter gradient, on a hazy day it can
+slide well below the cloud into the gradual sub-cloud aerosol; and because the
+peak-detection amplitude lies far below the cloud/aerosol threshold of
+Section~\ref{sec:threshold}, a weak bump entirely within the aerosol could even be
+accepted as liquid. The base is therefore raised to the lowest gate that reaches
+cloud strength, and a candidate that never reaches cloud strength at all is
+rejected. The bright cloud core is kept while the sub-cloud haze reverts to
+aerosol; the halo recovery of Section~\ref{sec:grow} still runs afterwards to
+restore the layer's true extent.
 
 \subsection{Cold elevated signal (falling ice)}
 \label{sec:falling}
 
-\code{find\_falling} is the lidar-only branch of CloudnetPy's falling-hydrometeor
-detection: backscatter present in cold air is treated as ice. A pixel is
-\emph{falling} when it carries signal, lies above $2000\,\mathrm{m}$, and is
-colder than $\mathrm{COLD\_LIMIT} = \Tzero - 15 = -15\,\degc$. Above
-$4000\,\mathrm{m}$ an \emph{isolated} single gate (fewer than two signal gates in
-a $\pm 3$-gate window) is dropped, to avoid mislabelling thin aerosol as ice.
+Backscatter present in sufficiently cold air is taken to be ice. This is the
+lidar-only remnant of CloudnetPy's falling-hydrometeor detection: a pixel is
+treated as falling ice when it carries signal, lies well above the boundary layer
+(above $2000\,\mathrm{m}$), and is colder than $-15\,\degc$. Higher still, an
+isolated single gate with no neighbours is discarded, so that a stray speck of
+thin aerosol is not mistaken for cirrus.
 
 \subsection{Depolarization ice (CL61 only)}
 \label{sec:depolice}
 
-On the CL61, linear depolarization gives directly what CloudnetPy otherwise gets
-from radar. \code{find\_depol\_ice} marks every signal pixel whose depolarization
-exceeds $\mathrm{ICE\_DEPOL\_LIMIT} = 0.15$ as ice:
-%
-\begin{equation}
-  \mathrm{ice\_like} = \neg\,\mathrm{mask}(\beta)\ \wedge\ (\delta > 0.15).
-\end{equation}
-%
-Liquid droplets are spherical and barely depolarize ($\delta < 0.1$); ice
-crystals are non-spherical and depolarize strongly ($\delta \sim 0.3$--$0.5$). The
-threshold sits between the two populations. This both vetoes \code{find\_liquid}
-false positives (ice virga read as a droplet layer) and recovers ice that
-\code{find\_falling} misses below its altitude/temperature cutoffs.
+On the CL61 the linear depolarization ratio supplies directly what CloudnetPy
+would otherwise take from radar. Spherical liquid droplets barely depolarize the
+return ($\delta < 0.1$), whereas non-spherical ice crystals depolarize it strongly
+($\delta \sim 0.3$--$0.5$). Any signal pixel whose depolarization exceeds $0.15$
+--- a value that sits cleanly between the two populations --- is marked as ice.
+This both vetoes false liquid layers, such as ice virga read as a droplet cloud,
+and recovers ice that the cold-signal test of Section~\ref{sec:falling} misses
+because it falls below the altitude or temperature cutoffs.
 
 \subsection{Growing and filling liquid layers}
 \label{sec:grow}
 
-\code{find\_liquid} marks only the sharp core of a layer; the weaker gates hugging
-its base and top are still cloud but fall outside the gradient bounds. Two
-operators absorb them:
-
-\begin{description}[style=nextline, leftmargin=1.2em, nosep]
-  \item[\code{grow\_liquid}] dilates the droplet mask along range into adjacent
-        gates that carry signal and are not \emph{blocked} (ice). Growth is
-        \emph{asymmetric}: generous upward ($100\,\mathrm{m}$, to recover the
-        attenuated true top), minimal downward ($10\,\mathrm{m}$, to avoid
-        swallowing sub-cloud aerosol/drizzle). Distances are converted to gate
-        counts for the instrument's resolution.
-  \item[\code{fill\_thin\_clouds}] relabels a \emph{whole} contiguous signal run
-        as liquid when it contains a droplet gate and is no thicker than
-        $100\,\mathrm{m}$. Thicker runs (a cloud over a deep aerosol column) are
-        left alone so genuine aerosol below the cloud is not absorbed.
-\end{description}
+The peak-based detection marks only the sharp core of a liquid layer; the weaker
+gates hugging its base and top belong to the same cloud but fall outside the shape
+test. Two operations recover them. The first grows the droplet mask into adjacent
+signal-bearing gates that are not blocked by ice, and does so asymmetrically:
+generously upward (about $100\,\mathrm{m}$, to recover the attenuated true top that
+the lidar could not see through) but only slightly downward (about
+$10\,\mathrm{m}$, to avoid swallowing sub-cloud aerosol or drizzle). The second
+relabels an entire contiguous run of signal as liquid when it contains a droplet
+gate and is no thicker than about $100\,\mathrm{m}$; thicker runs, such as a thin
+cloud sitting atop a deep aerosol column, are left untouched so that genuine
+aerosol beneath the cloud is not absorbed.
 
 \subsection{Supercooled limit}
 
-\code{correct\_supercooled} removes droplet gates colder than
-$\mathrm{SUPERCOOLED\_LIMIT} = \Tzero - 38 = -38\,\degc$, below which liquid water
-cannot exist.
+Liquid water cannot persist below about $-38\,\degc$, so any droplet gates colder
+than this are removed.
 
 %======================================================================
 \section{The adaptive backscatter threshold}
@@ -448,71 +410,60 @@ low-cloud continua.
 \label{sec:classify}
 %======================================================================
 
-\code{classify(ceilo, model)} composes the primitives into the final category
-grid. The skeleton, ignoring depolarization for a moment, is:
-
-\begin{enumerate}[nosep]
-  \item Compute the freezing region (Section~\ref{sec:t0}) and the liquid layers
-        (Section~\ref{sec:liquid}); grow and fill them
-        (Section~\ref{sec:grow}); apply the supercooled limit.
-  \item Pick $\beta_{\mathrm{strong}}$ (Section~\ref{sec:threshold}).
-  \item Mark \emph{bright} signal: $\neg\,\mathrm{mask}(\beta) \wedge
-        (\beta > \beta_{\mathrm{strong}})$. \emph{Strong} signal is bright and
-        non-droplet.
-  \item \textbf{Ice} $=$ strong signal in the freezing region.
-        \textbf{Drizzle/rain} $=$ strong signal in the warm region (below
-        \Tzero), gated on a source above it (Section~\ref{sec:source}).
-        \textbf{Aerosol} $=$ any remaining signal.
-  \item Assemble category codes (Section~\ref{sec:assemble}) and despeckle.
-\end{enumerate}
+The classifier brings the detection masks and the model together into the final
+category grid. Setting depolarization aside for the moment, its logic is
+straightforward. It first establishes the freezing region
+(Section~\ref{sec:t0}) and the liquid layers (Section~\ref{sec:liquid}), grows and
+fills the latter and trims any that are too cold to be liquid, and selects the
+cloud/aerosol threshold of Section~\ref{sec:threshold}. Signal brighter than this
+threshold, once the droplet layers are set aside, is the strong non-liquid return
+that marks hydrometeors: within the freezing region it is ice, and in the warm air
+below it is drizzle or rain, subject to the source test of
+Section~\ref{sec:source}. Any remaining signal, too weak to be a hydrometeor, is
+aerosol. The categories are then assembled with a fixed precedence and the result
+is despeckled (Section~\ref{sec:assemble}).
 
 \subsection{Depolarization refinements (CL61 only)}
 
-When depolarization is available, \code{ice\_like} (Section~\ref{sec:depolice})
-sharpens three things:
+On the CL61 the depolarization-based ice mask of Section~\ref{sec:depolice}
+sharpens three parts of this picture, each tied to the phase change at the melting
+level.
 
-\paragraph{(a) Multiple-scattering tail.}
-\emph{Inside} a liquid layer, depolarization climbs from multiple scattering and
-would falsely trip the ice veto, carving out the densest part of a real droplet
-cloud. Genuine liquid layers are identified (they contain a low-depol
-single-scattering part that pure ice lacks) and shielded --- the whole layer plus
-a short tail of $\mathrm{MS\_TAIL} = 80\,\mathrm{m}$ above it (the
-$\sim$90th-percentile observed tail) --- from the veto. With depolarization
-available, \code{ice\_like} also \emph{replaces} \code{find\_falling}'s
-$-15\,\degc / 2000\,\mathrm{m}$ heuristic as the barrier to liquid growth, so a
-genuine high-altitude supercooled cloud top (e.g.\ at Troll) is not clipped.
+\paragraph{(a) Protecting liquid from its own multiple scattering.}
+Deep inside a liquid layer the depolarization climbs as photons scatter multiple
+times, and left unchecked this would trip the ice veto and carve the densest part
+of a real droplet cloud out into ice. Genuine liquid layers are recognized by the
+low-depolarization single-scattering signature at their base, which pure ice
+lacks, and are shielded from the veto --- the whole layer together with a short
+tail above it, of order $80\,\mathrm{m}$, covering the observed reach of the
+multiple-scattering enhancement. Where depolarization is available it also
+replaces the cold-signal heuristic of Section~\ref{sec:falling} as the barrier to
+upward liquid growth, so that a genuinely high supercooled cloud top --- as seen at
+Troll --- is not clipped away.
 
 \paragraph{(b) Extending the freezing region down to observed ice.}
-A model \Tzero{} level biased \emph{high} leaves depol-confirmed ice on its warm
-side (falling ice not yet melted). \code{\_extend\_cold\_to\_ice} floods the
-freezing region \emph{downward} through contiguous \emph{solid-ice} gates --- but
-no more than $\mathrm{max\_depth} = 1500\,\mathrm{m}$ below the original boundary,
-so lofted dust touching cloud cannot drag the whole column sub-freezing. Two
-conditions gate the flood:
-\begin{enumerate}[nosep, label=(\roman*)]
-  \item \emph{Cloud strength} ($\beta > \beta_{\mathrm{strong}}$): a daytime
-        boundary layer can be full of weakly-backscattering yet strongly-
-        depolarizing aerosol (dust, pollen) that would otherwise reach the ground.
-  \item \emph{Solid-ice depolarization}
-        ($\delta > \mathrm{ICE\_CORE\_DEPOL\_LIMIT} = 0.30$, well above the $0.15$
-        ice/liquid limit of Section~\ref{sec:depolice}). Across the melting level
-        depolarization drops from solid ice ($\sim$0.4--0.5) to the $\sim$0.2 of
-        the wet/melting rain shaft below it, so the solid-ice base sits at that
-        drop. Requiring solid-ice depol stops the flood \emph{at the phase change}
-        rather than running on through the still-depolarizing rain below \Tzero{},
-        which would otherwise drag the ice region far into warm air.
-\end{enumerate}
-The new ice base is then smoothed against noisy single-profile pillars: the
-per-profile base height is replaced by its rolling median over $\pm 10$ profiles
-and the extension clipped to it. Keying on the base being an outlier (rather than
-on a profile count) makes it insensitive to time averaging and to clustered
-pillars. Figure~\ref{fig:extendice} shows a CL61 case where this applies.
+When the model places the $0\,\degc$ level too high, depolarization-confirmed ice
+--- falling ice not yet melted --- is left stranded on the warm side of the
+boundary. The freezing region is then flooded downward through the connected ice
+to meet this observed base, but by no more than $1500\,\mathrm{m}$, so that lofted
+dust touching a cloud cannot drag the whole column below freezing. Two conditions
+restrain the flood. It follows only cloud-strength signal, so that a boundary layer
+full of weakly scattering but strongly depolarizing aerosol such as dust or pollen
+cannot carry it to the ground; and it requires the high depolarization of solid
+ice ($\delta > 0.30$, well beyond the $0.15$ ice/liquid limit), so that it stops at
+the phase change itself. Across the melting level the depolarization falls from
+that of solid ice to the lower value of the wet, melting particles below, and the
+solid-ice base sits at this drop; keying on it prevents the freezing region from
+running on down through the still-depolarizing rain beneath $0\,\degc$. The
+resulting ice base is smoothed against noisy single-profile spikes by clipping it
+to its rolling median over neighbouring profiles. Figure~\ref{fig:extendice} shows
+a case where this applies.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{extend-ice-below-t0.png}
-\caption{\code{\_extend\_cold\_to\_ice} on a CL61 case (panels: screened
-backscatter, depolarization, target classification; dashed line is the model
+\caption{Extending the ice region down to observed ice on a CL61 case (panels:
+screened backscatter, depolarization, target classification; dashed line is the model
 $0\,\degc$ level at $\sim$1.7\,km). The depolarization panel shows cloud-strength,
 strongly depolarizing ice reaching \emph{below} the model $0\,\degc$ line ---
 falling ice not yet melted, where the model freezing level is biased high. The
@@ -521,32 +472,33 @@ mislabelling the sub-\Tzero{} ice as drizzle/rain.}
 \label{fig:extendice}
 \end{figure}
 
-\paragraph{(c) The melt band (extending rain up to observed ice).}
-The symmetric counterpart: when a depol-ice base sits \emph{above} the model
-\Tzero, the real melting level is higher than the model's, and the cold (per the
-model), cloud-strength, low-depol band between them is ice \emph{melting into
-rain}, not ice. \code{\_melt\_band\_below\_ice} marks the band as the
-cloud-strength signal reachable \emph{both} downward from the depol ice base
-\emph{and} upward from the warm region --- a continuous column linking the ice
-down to the rain across the melting level. Requiring both ends excludes low-depol
-patches buried inside an ice cloud and supercooled layers with no ice above them.
-Because the melting layer itself depolarizes (wet, irregular particles), a
-\emph{thin} ($\le 150\,\mathrm{m}$) high-depol enhancement at the melt level is
-bridged rather than allowed to block, while a thick coherent ice cloud still
-blocks. The band is then dropped from the freezing region, so it classifies as
-drizzle/rain. Figure~\ref{fig:meltband} shows this on a stratiform-rain day.
+\paragraph{(c) The melt band: extending rain up to observed ice.}
+The mirror image occurs when a depolarization-ice base sits above the model
+$0\,\degc$ level: the true melting level is then higher than the model's, and the
+layer between them --- cold according to the model, but cloud-strength and only
+weakly depolarizing --- is ice already melting into rain. This band is identified
+as the cloud-strength signal reachable both downward from the ice base and upward
+from the warm air, a continuous column linking the ice down to the rain across the
+melting level. Requiring both connections excludes weakly depolarizing patches
+buried inside an ice cloud and supercooled layers with no ice above them. Because
+the melting particles themselves depolarize, a thin high-depolarization
+enhancement at the melt level (no more than $150\,\mathrm{m}$) is bridged rather
+than allowed to block the connection, while a thick coherent ice cloud still blocks
+it. The band is then removed from the freezing region so that it classifies as
+drizzle or rain. Figure~\ref{fig:meltband} shows this on a stratiform-rain day.
 
-Note the asymmetry with~(b): the downward extension keys on the solid-ice limit
-($0.30$), but the melt band keys on the \emph{low} ice/liquid limit ($0.15$).
-Above a biased-\emph{low} \Tzero{} the air is genuinely warm and the melted drops
-are near-spherical, so the rain there has $\delta < 0.15$; a $0.15$--$0.30$
-depolarization on the \emph{cold} side of \Tzero{} is still cold ice and must
-\emph{not} be stripped to rain, which a solid-ice threshold here would do.
+There is a deliberate asymmetry between (b) and (c). The downward extension keys on
+the solid-ice depolarization ($0.30$), whereas the melt band keys on the lower
+ice/liquid value ($0.15$). Above a $0\,\degc$ level biased low the air is genuinely
+warm and the melted drops are near-spherical, so the rain there depolarizes weakly;
+a depolarization between $0.15$ and $0.30$ on the cold side of the boundary is
+still ice and must not be stripped to rain, as a solid-ice threshold applied there
+would wrongly do.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{extended-drizzle-above-t0.png}
-\caption{\code{\_melt\_band\_below\_ice} on a stratiform-rain CL61 day at
+\caption{The melt band on a stratiform-rain CL61 day at
 Lindenberg (panels: screened backscatter, depolarization, target classification;
 dashed line is the model $0\,\degc$ level at $\sim$2.1\,km). The depol-ice base
 (strong depolarization above the low-depol rain) sits \emph{above} the model
@@ -560,45 +512,37 @@ observed melt level.}
 \subsection{The drizzle source gate}
 \label{sec:source}
 
-Drizzle and rain fall \emph{from} a cloud: precipitation and its parent cloud form
-one contiguous signal column. \code{\_source\_connected} keeps a warm bright gate
-as drizzle/rain only when a cloud gate (liquid layer or ice) lies \emph{above} it
-and every gate between carries signal. This rejects two false sources:
-\begin{itemize}[nosep]
-  \item a bright layer separated from anything above by clear air (e.g.\ a
-        near-surface aerosol blob far below an unrelated cirrus --- the path is
-        broken);
-  \item a cloud \emph{below} the layer (e.g.\ haze sitting above a shallow surface
-        fog --- the cloud is not above it). This is what keeps the cloud-free
-        bright marine haze at Mindelo classified as aerosol, not drizzle.
-\end{itemize}
-The cloud mask may first be dilated by $\pm\,$\code{drizzle\_source\_window}
-profiles in time, so a single-profile gap at a ragged cloud edge does not drop a
-genuine drizzle shaft beside it. The default window is $0$ (source required in the
-same profile); a negative value disables the gate entirely.
+Drizzle and rain fall from a cloud: precipitation and the cloud that produces it
+form a single continuous column of signal. A warm bright gate is therefore kept as
+drizzle or rain only when a cloud --- a liquid layer or ice --- lies above it with
+unbroken signal in between. This rejects two kinds of false precipitation: a bright
+layer cut off from anything above by clear air, such as a near-surface aerosol blob
+far below an unrelated cirrus; and a bright layer whose only nearby cloud lies
+below rather than above it, such as haze resting on a shallow surface fog. The
+latter is what keeps the bright, cloud-free marine haze at Mindelo classified as
+aerosol rather than drizzle. To keep a ragged cloud edge from dropping a genuine
+drizzle shaft beside it, the cloud mask may optionally be dilated by a few profiles
+in time before the test.
 
 \paragraph{Bridging the melting-layer notch.}
-Requiring \emph{strictly} continuous signal has a failure mode at the melting
-level. A melting layer produces a backscatter notch that frequently falls below
-the screening threshold, leaving a thin masked band between the rain below and the
-ice above --- and a single masked gate breaks the path, so the whole drizzle
-column beneath it loses its source and falls through to aerosol. The gate
-therefore bridges a clear-air run no longer than
-$\mathrm{DRIZZLE\_SOURCE\_MAX\_GAP} = 100\,\mathrm{m}$, bounded by signal on both
-sides, before tracing the path. This reconnects the drizzle across the screened
-melt notch while still rejecting the Mindelo case: a kilometre-scale clear gap has
-an unbridged core far longer than $100\,\mathrm{m}$, so its path stays broken. The
-distance is the discriminator the bare continuity test lacked --- a melt notch is
-tens of metres, an unrelated cirrus sits kilometres up. On a stratiform-rain CL61
-day at Lindenberg this recovers $\sim$6\,000 gates from aerosol to drizzle, of
-which $98\%$ are confirmed precipitation or melting by the co-located radar
-Cloudnet product (the same gates it had mislabelled aerosol).
+Demanding strictly unbroken signal fails at the melting level, where the
+backscatter dips into a notch that often falls below the screening threshold. This
+leaves a thin masked gap between the rain below and the ice above, and a single
+masked gate is enough to sever the column and let the whole drizzle shaft beneath
+fall through to aerosol. The source test therefore bridges a clear-air gap of up to
+$100\,\mathrm{m}$, bounded by signal on both sides, before tracing the path. The
+width of the gap is what distinguishes the two situations the bare continuity test
+could not: a melt notch is tens of metres deep, whereas the clear air beneath an
+unrelated cirrus is kilometres deep and stays unbridged. On the stratiform-rain
+CL61 day at Lindenberg this recovers several thousand gates from aerosol to
+drizzle, of which $98\%$ are confirmed as precipitation or melting by the
+co-located radar in the standard Cloudnet product.
 
 \subsection{Category precedence and despeckling}
 \label{sec:assemble}
 
-\code{\_assemble} writes the category codes with later rules overwriting earlier
-ones, encoding the precedence ``liquid layers sit on top'':
+The categories are written in order of increasing precedence, so that later rules
+overwrite earlier ones and the rule ``liquid layers sit on top'' is honoured:
 %
 \begin{center}
 \small
@@ -606,10 +550,8 @@ aerosol $\rightarrow$ ice $\rightarrow$ drizzle/rain $\rightarrow$
 droplet (warm) $\rightarrow$ supercooled (droplet $\wedge$ cold).
 \end{center}
 %
-Finally \code{\_despeckle} clears any classified pixel with fewer than
-\code{speckle\_min} (default $3$) classified pixels in its $3\times3$
-neighbourhood, removing isolated specks left by screening noise. It is computed
-efficiently with a 2-D summed-area (integral-image) table.
+Finally, isolated specks left by screening noise are removed: any classified pixel
+with too few classified neighbours in its immediate surroundings is cleared.
 
 %======================================================================
 \section{Output categories}
