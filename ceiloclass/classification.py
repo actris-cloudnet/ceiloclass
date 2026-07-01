@@ -19,6 +19,7 @@ from ceilopyter import Ceilo
 from numpy import ma
 
 from .detection import (
+    DEEP_COLD_LIMIT,
     ICE_CORE_DEPOL_LIMIT,
     ICE_DEPOL_LIMIT,
     _fill_runs,
@@ -237,6 +238,14 @@ def classify(
     ice = strong & cold
     if ice_like is not None:
         ice = ice | (cold & ice_like)
+    else:
+        # No depolarization: faint upper-tropospheric cirrus can sit below the
+        # adaptive backscatter threshold and would fall through to aerosol. Deep
+        # cold (< -25 degC) elevated signal is ice regardless of strength -- a
+        # temperature guard that recovers such cirrus while staying well clear of
+        # lofted dust, which only reaches ~-19 degC even when elevated.
+        deep_ice = find_falling(beta, height, tw, cold_limit=DEEP_COLD_LIMIT)
+        ice = ice | (cold & deep_ice)
     # Drizzle/rain is strong warm signal that connects up through continuous
     # signal to a cloud source (see _source_connected); bright warm signal with
     # no cloud above is aerosol, not drizzle (e.g. the cloud-free marine haze at

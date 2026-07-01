@@ -323,6 +323,33 @@ CASES: list[Case] = [
             ),
         ],
     ),
+    Case(
+        id="lindenberg-da10-cirrus",
+        site="lindenberg",
+        date="2026-06-02",
+        instrument="da10",
+        note="Faint cirrus over a bright boundary layer (DA10, no depol). Its "
+        "backscatter sits below the adaptive threshold, which pins to its 1e-5 cap "
+        "here, so without help the whole deck falls through to aerosol. The "
+        "deep-cold (< -25 degC) ice guard must recover the cold upper cirrus as "
+        "ice while the warm boundary layer stays aerosol -- and dust (which only "
+        "reaches ~-19 degC) must never be caught, see the granada cases.",
+        checks=[
+            Check(
+                "cold upper cirrus is ice",
+                Target.ICE,
+                min_frac=0.10,
+                hours=(2.0, 18.0),
+                height_m=(6000, 10000),
+            ),
+            Check(
+                "the boundary layer is classified (as aerosol)",
+                Target.AEROSOL,
+                min_frac=0.30,
+                height_m=(0, 2000),
+            ),
+        ],
+    ),
 ]
 
 

@@ -76,6 +76,22 @@
     "strong_beta": 1e-5,
     "t0_median": 1208.6
   },
+  "lindenberg-da10-cirrus": {
+    "checks": {
+      "cold upper cirrus is ice": 0.22544,
+      "the boundary layer is classified (as aerosol)": 0.99391
+    },
+    "fractions": {
+      "AEROSOL": 0.16655,
+      "CLEAR": 0.78922,
+      "DRIZZLE_OR_RAIN": 2e-5,
+      "DROPLET": 0.00083,
+      "ICE": 0.04081,
+      "SUPERCOOLED": 0.00257
+    },
+    "strong_beta": 1e-5,
+    "t0_median": 2337.9
+  },
   "lindenberg-da10-dial": {
     "checks": {
       "evening sub-cloud precipitation is drizzle/rain": 0.17636,

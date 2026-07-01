@@ -16,6 +16,12 @@ from .model import T0
 COLD_LIMIT = T0 - 15
 """Temperature below which elevated lidar signal is treated as ice (K)."""
 
+DEEP_COLD_LIMIT = T0 - 25
+"""Colder ice limit for the no-depol path: below this, elevated signal is ice
+regardless of backscatter strength. Set well below `COLD_LIMIT` so lofted dust
+(which reaches only ~-19 degC even when elevated) is never caught, while genuine
+upper-tropospheric cirrus (which runs far colder) is recovered."""
+
 DESPECKLE_ALTITUDE = 4000.0
 """Altitude above which isolated single-gate ice signal is treated as noise (m)."""
 
