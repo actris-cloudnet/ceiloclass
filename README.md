@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/actris-cloudnet/ceiloclass/actions/workflows/ci.yml/badge.svg)](https://github.com/actris-cloudnet/ceiloclass/actions/workflows/ci.yml)
 
-Cloud, aerosol and precipitation classification from ceilometer and lidar
+Cloud, aerosol and precipitation classification from ceilometer / lidar
 backscatter and model temperature. Built on
 [ceilopyter](https://github.com/actris-cloudnet/ceilopyter) for reading and
 harmonizing the instrument data.
