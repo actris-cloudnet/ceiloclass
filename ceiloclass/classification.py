@@ -476,7 +476,13 @@ def _adaptive_strong_beta(
     latter matters when aerosol and cloud are not cleanly separated (a polar
     winter continuum of low cloud, where the anchor can land on the cloud mode
     and the threshold would otherwise run off): aerosol backscatter does not
-    physically exceed ~1e-5 sr-1 m-1, so anything above that is cloud.
+    physically exceed ~1e-5 sr-1 m-1, so anything above that is cloud. The former
+    (`max_peak_ratio`) is a heuristic, load-scaling backstop -- not a physical or
+    tuned value: it keeps the threshold within a factor of the aerosol mode when
+    no shoulder/valley is found, and is the tighter bound for a faint mode where
+    the absolute cap is too generous. It is deliberately loose (~1.4 decades above
+    the mode) and never binds on the regression cases, so its exact value is not
+    critical.
 
     Uses the whole column: the threshold is anchored on the low aerosol peak and
     the high tail is ignored, so cloud aloft must stay in the distribution for the

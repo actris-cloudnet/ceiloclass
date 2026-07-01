@@ -372,81 +372,76 @@ cannot exist.
 \label{sec:threshold}
 %======================================================================
 
-The pivotal decision in radar-free classification is: \emph{how bright must
-signal be to count as cloud/precipitation rather than aerosol?} A fixed threshold
-fails because aerosol load varies enormously by site and day (a dusty Granada
-afternoon vs.\ a clean Arctic morning). \code{\_adaptive\_strong\_beta} therefore
-derives the threshold $\beta_{\mathrm{strong}}$ from the data distribution itself.
+The pivotal decision in radar-free classification is: \emph{how bright
+must signal be to count as cloud/precipitation rather than aerosol?} A
+fixed threshold fails because aerosol load varies enormously by site
+and day (a dusty Granada afternoon vs.\ a clean Arctic
+morning). \code{\_adaptive\_strong\_beta} therefore derives the
+threshold $\beta_{\mathrm{strong}}$ from the data distribution itself.
 This is the second major divergence from CloudnetPy.
 
-Ceilometer backscatter has a low-value aerosol/background mode; cloud and
-precipitation form either a weaker high tail or a distinct second, higher mode.
-The algorithm:
+The cloud--aerosol backscatter threshold, $\beta_{\mathrm{strong}}$,
+is derived adaptively from the observed backscatter distribution
+rather than prescribed as a fixed value. This accounts for the large
+day-to-day and site-to-site variability in aerosol loading (e.g. a
+dusty continental boundary layer versus a clean Arctic atmosphere).
 
-\begin{enumerate}[nosep]
-  \item Histogram $\log \beta$ over the $1$st--$99.9$th percentile range in $60$
-        bins (using the \emph{whole} column, so cloud aloft remains in the
-        distribution), and lightly smooth the counts.
-  \item \textbf{Anchor on the aerosol mode}: the \emph{lowest} prominent peak, not
-        necessarily the tallest --- on a cloudy day the cloud mode can out-count
-        the aerosol mode. A lower peak is preferred over the tallest only when a
-        genuine valley (counts dropping to $\le 0.5\times$ the lower peak)
-        separates them, rejecting mere noise bumps on the rising edge.
-  \item \textbf{Place the threshold} past the anchor:
-        \begin{itemize}[nosep]
-          \item if a higher \emph{cloud-bright} mode exists --- one both $>2\times$
-                the aerosol value \emph{and} above
-                $\mathrm{min\_cloud\_beta} = 3\times10^{-6}\,\betau$ --- at the
-                \emph{valley} (minimum count) between the two modes. (A second mode
-                still at aerosol-level backscatter is layered aerosol, e.g.\ lofted
-                Saharan dust, not cloud, and must not be split off as drizzle.)
-          \item otherwise at the aerosol mode's right \emph{shoulder}, where the
-                count first falls below $5\%$ of the peak (anchored on the highest
-                aerosol mode, so a secondary aerosol layer stays below the
-                threshold).
-        \end{itemize}
-  \item \textbf{Cap} the result at $25\times$ the anchor peak value and at the
-        absolute ceiling $\mathrm{max\_strong\_beta} = 10^{-5}\,\betau$. The
-        absolute cap matters in a polar-winter continuum of low cloud, where the
-        anchor can land on the cloud mode and the threshold would otherwise run
-        off: aerosol backscatter does not physically exceed
-        $\sim 10^{-5}\,\betau$, so anything above that is cloud.
-\end{enumerate}
+All positive backscatter values in the ceilometer profile are
+histogrammed in logarithmic space between the 1st and 99.9th
+percentiles using 60 bins, and the histogram is lightly smoothed with
+a three-bin moving average to suppress noise. The lowest well-defined
+mode is taken as the aerosol mode. This is not necessarily the
+histogram maximum, since on heavily overcast days the cloud mode may
+contain more samples than the aerosol population. A lower-valued mode
+is therefore preferred whenever it is separated from the dominant peak
+by a genuine minimum in the histogram, preventing small fluctuations
+on the shoulder of a broad peak from being interpreted as independent
+aerosol modes.
 
-Figure~\ref{fig:adaptive} shows the four qualitatively different distributions
-this must handle, each standing for a documented site/day, with the threshold the
-algorithm returns and the resulting aerosol\,/\,cloud split:
-\begin{description}[style=nextline, leftmargin=1.2em, nosep]
-  \item[(a) Cloudy, bimodal] a clear aerosol mode and a separate cloud mode --- the
-        threshold lands in the valley between them.
-  \item[(b) Dusty, two aerosol modes] a boundary-layer mode plus a lofted-dust
-        mode, both at aerosol-level backscatter (a dusty Granada day): the second
-        mode is \emph{not} cloud-bright, so the threshold sits above it (shoulder)
-        and keeps the dust as aerosol rather than splitting it off as drizzle.
-  \item[(c) Clean, single mode] one aerosol mode with only a weak high tail --- the
-        threshold falls on the mode's right shoulder.
-  \item[(d) Polar-winter continuum] a single low-cloud mode with no separable
-        aerosol mode: the anchor lands on cloud and the threshold would run off,
-        so the absolute $10^{-5}\,\betau$ ceiling holds it down.
-\end{description}
+The threshold is then placed according to the histogram morphology. If
+a second mode exists at substantially larger backscatter (more than
+twice the aerosol-mode value and exceeding
+$3\times10^{-6}\,\mathrm{sr^{-1}\,m^{-1}}$), it is interpreted as
+cloud or precipitation, and the threshold is placed at the minimum
+between the aerosol and cloud modes. Otherwise, the distribution is
+treated as aerosol only (possibly with multiple aerosol layers), and
+the threshold is placed on the right-hand shoulder of the aerosol
+mode, where the histogram has fallen to 5\% of its peak value. When
+multiple aerosol modes are present, the shoulder is referenced to the
+highest aerosol mode so that elevated aerosol layers (e.g. lofted
+Saharan dust) remain classified as aerosol rather than being separated
+as cloud.
+
+Finally, the threshold is bounded by both a relative limit (25 times
+the aerosol-mode backscatter) and an absolute limit of
+$10^{-5}\,\mathrm{sr^{-1}\,m^{-1}}$. The relative bound acts only as a
+conservative fallback if neither a distinct valley nor shoulder can be
+identified, whereas the absolute bound prevents unrealistically large
+thresholds in cases where aerosol and cloud are not separable, such as
+persistent polar low-cloud conditions. If fewer than 1000 valid
+backscatter samples are available, the algorithm returns the default
+threshold of $3\times10^{-6}\,\mathrm{sr^{-1}\,m^{-1}}$.
+
+Figure~\ref{fig:adaptive_beta} illustrates four representative
+histogram morphologies encountered by the adaptive threshold
+algorithm, demonstrating how the threshold is placed for bimodal cloud
+cases, multilayer aerosol, clean conditions, and polar-winter
+low-cloud continua.
 
 \begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{adaptive_threshold.png}
-\caption{The adaptive threshold $\beta_{\mathrm{strong}}$ (dashed) on four
-representative backscatter histograms, each reproducing a \code{ceiloclass}
-regression case. Bars are coloured by the resulting split: aerosol below the
-threshold (blue), cloud/precipitation above (orange). The same algorithm places
-the cut at the inter-mode valley (a), above a non-bright second aerosol mode (b),
-at the single mode's shoulder (c), and at the absolute ceiling when no aerosol
-mode is separable (d). Regenerate with
-\code{python docs/adaptive\_threshold\_figure.py}.}
-\label{fig:adaptive}
+\centering \includegraphics[width=\linewidth]{adaptive_threshold.png}
+\caption{Adaptive backscatter threshold ($\beta_{\mathrm{strong}}$,
+  dashed line) for four representative backscatter histograms, each
+  corresponding to a ceiloclass regression case. Histogram bars are
+  coloured according to the resulting classification: aerosol below
+  the threshold (blue) and cloud or precipitation above (orange). The
+  algorithm places the threshold (a) at the valley between aerosol and
+  cloud modes, (b) above a secondary aerosol mode that does not
+  satisfy the cloud-bright criterion, (c) on the shoulder of a single
+  aerosol mode, and (d) at the absolute upper limit when no separable
+  aerosol mode is present.}
+\label{fig:adaptive_beta}
 \end{figure}
-
-The threshold can be overridden by passing \code{strong\_beta=} to
-\code{classify}; the default $3\times10^{-6}\,\betau$ is returned only when there
-are too few samples ($<1000$).
 
 %======================================================================
 \section{Classification assembly}
