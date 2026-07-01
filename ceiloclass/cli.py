@@ -29,9 +29,11 @@ from .download import (
     list_harmonized_sources,
     list_raw_sources,
     site_altitude,
+    site_geolocation,
 )
-from .model import read_altitude
+from .model import read_altitude, read_geolocation
 from .plot import plot_classification
+from .write import write_classification
 
 READERS = {
     "cl31": read_cl31,
@@ -124,6 +126,12 @@ def _add_arguments(p: argparse.ArgumentParser) -> None:
         metavar="SECONDS",
         help="Average into time bins of this width before classifying (faster)",
     )
+    p.add_argument(
+        "-o",
+        "--output",
+        metavar="FILE",
+        help="Write the classification to this compressed netCDF4 (.nc) file",
+    )
     p.add_argument("--plot", help="Write a classification plot to this PNG file")
     p.add_argument("--show", action="store_true", help="Show the plot in a window")
     p.add_argument(
@@ -166,6 +174,27 @@ def _select_source(
         if choice.isdigit() and 1 <= int(choice) <= len(sources):
             return sources[int(choice) - 1]
         print("Please enter a number from the list.")
+
+
+def _geolocation(
+    args: argparse.Namespace, model: str
+) -> tuple[float | None, float | None, str | None]:
+    """Site latitude, longitude and name for the output file.
+
+    Prefers the Cloudnet portal (the true instrument coordinates) when a site is
+    given; falls back to the model file, whose latitude/longitude are the offset
+    NWP grid point, only when the portal gives nothing.
+    """
+    latitude = longitude = None
+    location = None
+    if args.site:
+        latitude, longitude, _alt, location = site_geolocation(args.site)
+    if latitude is None or longitude is None:
+        mlat, mlon, mloc = read_geolocation(model)
+        latitude = latitude if latitude is not None else mlat
+        longitude = longitude if longitude is not None else mlon
+        location = location or mloc
+    return latitude, longitude, location
 
 
 def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -234,6 +263,20 @@ def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         count = int((result.target == target.value).sum())
         if count:
             print(f"  {target.name:30s} {count / total * 100:6.2f}%")
+
+    if args.output:
+        latitude, longitude, location = _geolocation(args, model)
+        write_classification(
+            result,
+            args.output,
+            wavelength=ceilo.wavelength,
+            altitude=altitude,
+            latitude=latitude,
+            longitude=longitude,
+            location=location,
+            source_files=files,
+        )
+        print(f"\nwrote {args.output}")
 
     if args.plot or args.show:
         plot_kwargs = {}

@@ -4,3 +4,4 @@ from .classification import classify as classify
 from .model import Model as Model
 from .model import read_altitude as read_altitude
 from .model import read_model as read_model
+from .write import write_classification as write_classification

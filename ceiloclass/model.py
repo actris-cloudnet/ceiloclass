@@ -182,6 +182,29 @@ def read_altitude(path: str | PathLike) -> float | None:
     return None
 
 
+def read_geolocation(
+    path: str | PathLike,
+) -> tuple[float | None, float | None, str | None]:
+    """Read (latitude, longitude, location name) from a netCDF, when present.
+
+    Any of the three is `None` if absent. Latitude/longitude are taken from the
+    first grid point (Cloudnet single-site model files carry one).
+    """
+    lat = lon = None
+    location = None
+    try:
+        with netCDF4.Dataset(path) as nc:
+            if "latitude" in nc.variables:
+                lat = float(np.asarray(nc["latitude"][:]).ravel()[0])
+            if "longitude" in nc.variables:
+                lon = float(np.asarray(nc["longitude"][:]).ravel()[0])
+            if "location" in nc.ncattrs():
+                location = str(nc.location)
+    except OSError:
+        return None, None, None
+    return lat, lon, location
+
+
 def _model_surface_altitude(
     nc: netCDF4.Dataset,
 ) -> npt.NDArray[np.floating] | None:

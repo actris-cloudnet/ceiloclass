@@ -238,8 +238,37 @@ def site_altitude(site_id: str) -> float | None:
     """Site altitude (m above mean sea level) from the Cloudnet portal, if known."""
     try:
         return float(APIClient().site(site_id).altitude)
-    except (OSError, AttributeError, TypeError, ValueError):
+    except (CloudnetAPIError, OSError, AttributeError, TypeError, ValueError):
         return None
+
+
+def site_geolocation(
+    site_id: str,
+) -> tuple[float | None, float | None, float | None, str | None]:
+    """Site (latitude, longitude, altitude, name) from the Cloudnet portal.
+
+    These are the true instrument coordinates, unlike a model file's latitude and
+    longitude which are the (offset) NWP grid-point location. Any field is `None`
+    if unavailable; all are `None` if the portal cannot be reached.
+    """
+
+    def _num(value: object) -> float | None:
+        try:
+            return float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+
+    try:
+        site = APIClient().site(site_id)
+    except (CloudnetAPIError, OSError):
+        return None, None, None, None
+    name = getattr(site, "human_readable_name", None) or getattr(site, "id", None)
+    return (
+        _num(getattr(site, "latitude", None)),
+        _num(getattr(site, "longitude", None)),
+        _num(getattr(site, "altitude", None)),
+        name,
+    )
 
 
 def _download_missing(
