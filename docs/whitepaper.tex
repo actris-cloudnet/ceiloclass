@@ -63,7 +63,7 @@ A ceilometer measures range-corrected attenuated backscatter $\beta(t, z)$ as a
 function of time $t$ and range $z$. Unlike a cloud radar it cannot, on its own,
 separate hydrometeor phase: a bright backscatter return may be a liquid droplet
 cloud, falling ice, or dense aerosol. CloudnetPy resolves this ambiguity by
-combining lidar with radar reflectivity, Doppler velocity and (for the CL61)
+combining lidar with radar reflectivity, Doppler velocity and
 linear depolarization. \code{ceiloclass} reconstructs as much of that
 classification as possible \emph{without} the radar, leaning instead on:
 
@@ -221,9 +221,13 @@ failing the whole classification.
 \subsection{The extrapolated (quality) flag}
 
 The returned \code{Model} carries a boolean \code{extrapolated} field, true where
-$T_w$ was clamped or extrapolated --- either above the model top or outside the
-model's temporal coverage. This is surfaced downstream as the \code{quality}
-field of the classification, flagging lower-confidence pixels.
+$T_w$ was extrapolated \emph{above the model top} or \emph{outside the model's
+temporal coverage}. Outside the model levels the value is not clamped but linearly
+extrapolated along the edge slope (\code{interp\_extrap}). Extrapolation
+\emph{below} the lowest model level is deliberately \emph{not} flagged --- in
+complex terrain a site can sit below the model surface, and the extrapolation
+there gives a sensible near-ground value. The flag is surfaced downstream as the
+\code{quality} field of the classification, marking lower-confidence pixels.
 
 \subsection{The freezing level \texorpdfstring{$\Tzero$}{T0}}
 \label{sec:t0}

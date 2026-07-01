@@ -35,8 +35,10 @@ class Model:
 
     Attributes:
         tw: Wet-bulb (or dry-bulb) temperature (K), shape time x range.
-        extrapolated: True where tw falls outside the model's coverage in time
-            or above the highest model level (i.e. the value is clamped).
+        extrapolated: True where tw was extrapolated above the highest model
+            level or outside the model's coverage in time. Extrapolation below
+            the lowest model level is not flagged: it is deliberate (it gives a
+            site below the model surface a sensible near-ground value).
     """
 
     tw: npt.NDArray[np.floating]
