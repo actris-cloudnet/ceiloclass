@@ -534,6 +534,7 @@ def _adaptive_strong_beta(
     max_peak_ratio: float = 25.0,
     max_strong_beta: float = 1e-5,
     min_cloud_beta: float = 3e-6,
+    min_aerosol_beta: float = 1e-7,
     default: float = 3e-6,
 ) -> float:
     """Pick the cloud/aerosol backscatter threshold from the data distribution.
@@ -542,7 +543,13 @@ def _adaptive_strong_beta(
     precipitation form a weaker high tail or a second, higher mode. We anchor on
     the aerosol mode -- the *lowest* prominent peak, not necessarily the tallest
     (on a cloudy day the cloud mode can hold more pixels) -- and place the
-    threshold past it:
+    threshold past it. Modes below `min_aerosol_beta` are never anchor
+    candidates: aerosol backscatter lives around 1e-7..1e-5, so a lower mode is
+    molecular scattering or residual noise -- a 532 nm PollyXT sees the Rayleigh
+    return (~2e-9 at sea level) in clean-air gaps that a 910 nm ceilometer's
+    noise floor never resolves. Anchored on such a mode, the `max_peak_ratio`
+    cap would land mid-aerosol-mode and turn the whole aerosol population
+    "bright" (marine haze becoming drizzle at Mindelo). The threshold is placed:
 
     - if a higher *cloud-bright* mode exists (bimodal), at the **valley** (lowest
       count) between the aerosol mode and that next mode. The higher mode must be
@@ -593,8 +600,15 @@ def _adaptive_strong_beta(
     higher_right = np.r_[smooth[:-1] > smooth[1:], True]
     is_peak = higher_left & higher_right & (smooth >= smooth.max() * prominence_frac)
     peak_idx = np.flatnonzero(is_peak)
+    # Sub-aerosol modes (molecular return / residual noise, see docstring) are
+    # never anchor candidates.
+    peak_idx = peak_idx[centers[peak_idx] >= min_aerosol_beta]
     tallest = int(np.argmax(smooth))
     peak = tallest
+    if centers[tallest] < min_aerosol_beta and peak_idx.size:
+        # Even the tallest mode is sub-aerosol (a pristine molecular day):
+        # anchor on the lowest genuine mode instead.
+        peak = int(peak_idx[0])
     for p in peak_idx:
         if p >= tallest:
             break

@@ -114,6 +114,18 @@ def test_adaptive_strong_beta_caps_runaway():
     assert _adaptive_strong_beta(_beta(high)) == 1e-5
 
 
+def test_adaptive_strong_beta_ignores_molecular_mode():
+    # A 532 nm lidar (PollyXT) sees molecular backscatter in clean-air gaps: a
+    # small mode near 7e-9, far below any aerosol. It must not anchor the
+    # threshold -- the max_peak_ratio cap would then land mid-aerosol-mode
+    # (1.7e-7 at Mindelo) and turn the whole marine haze "bright" -> drizzle.
+    rng = np.random.default_rng(5)
+    molecular = rng.lognormal(np.log(7e-9), 0.3, 3000)
+    aerosol = rng.lognormal(np.log(1.5e-6), 0.35, 60000)
+    cutoff = _adaptive_strong_beta(_beta(np.concatenate([molecular, aerosol])))
+    assert cutoff > 3e-6  # anchored on the real aerosol mode, past its shoulder
+
+
 def test_adaptive_strong_beta_too_few_samples_returns_default():
     assert _adaptive_strong_beta(_beta(np.full(100, 1e-6))) == 3e-6
 

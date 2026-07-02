@@ -176,6 +176,22 @@
     "strong_beta": 2.23e-6,
     "t0_median": 4230.3
   },
+  "mindelo-pollyxt": {
+    "checks": {
+      "marine haze is not drizzle": 0.00212,
+      "the haze layer is classified (as aerosol)": 0.75779
+    },
+    "fractions": {
+      "AEROSOL": 0.09222,
+      "CLEAR": 0.90441,
+      "DRIZZLE_OR_RAIN": 0.00025,
+      "DROPLET": 0.00229,
+      "ICE": 6e-5,
+      "SUPERCOOLED": 0.00076
+    },
+    "strong_beta": 6.54e-6,
+    "t0_median": 4191.9
+  },
   "nyalesund-cloudy-arctic": {
     "checks": {
       "liquid clouds are detected": 0.01903,

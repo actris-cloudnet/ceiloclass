@@ -177,6 +177,32 @@ CASES: list[Case] = [
         ],
     ),
     Case(
+        id="mindelo-pollyxt",
+        site="mindelo",
+        date="2026-06-30",
+        instrument="pollyxt",
+        note="Marine haze under sparse liquid at the haze top, PollyXT (532 nm). "
+        "The clean-air molecular return forms a spurious histogram mode near "
+        "7e-9 that must not anchor the adaptive threshold: anchored there, the "
+        "max_peak_ratio cap lands mid-aerosol-mode (1.7e-7) and the whole haze "
+        "turns bright -> drizzle. The anchor floor (min_aerosol_beta) keeps the "
+        "threshold at the real aerosol shoulder, so the haze stays aerosol.",
+        checks=[
+            Check(
+                "marine haze is not drizzle",
+                Target.DRIZZLE_OR_RAIN,
+                max_frac=0.10,
+                height_m=(0, 3500),
+            ),
+            Check(
+                "the haze layer is classified (as aerosol)",
+                Target.AEROSOL,
+                min_frac=0.30,
+                height_m=(0, 3500),
+            ),
+        ],
+    ),
+    Case(
         id="kenttarova-drizzle",
         site="kenttarova",
         date="2023-09-04",
