@@ -20,10 +20,18 @@ def _cvar(
     dims: tuple[str, ...],
     *,
     fill_value: float | None = None,
+    least_significant_digit: int | None = None,
 ) -> netCDF4.Variable:
     """Create a zlib-compressed (shuffled) data variable."""
     return nc.createVariable(
-        name, dtype, dims, zlib=True, complevel=4, shuffle=True, fill_value=fill_value
+        name,
+        dtype,
+        dims,
+        zlib=True,
+        complevel=4,
+        shuffle=True,
+        fill_value=fill_value,
+        least_significant_digit=least_significant_digit,
     )
 
 
@@ -128,13 +136,16 @@ def write_classification(
         )
         tq[:] = np.asarray(classification.quality, dtype="i1")
 
-        tw = _cvar(nc, "Tw", "f4", ("time", "range"))
+        # Truncated to 0.01 K: far beyond model accuracy, and a smooth float
+        # field stored at full precision would dominate the file size (~5x).
+        tw = _cvar(nc, "Tw", "f4", ("time", "range"), least_significant_digit=2)
         tw.units = "K"
         tw.long_name = "Wet-bulb temperature"
         tw.standard_name = "wet_bulb_temperature"
         tw.comment = (
             "Model wet-bulb temperature interpolated onto the observation grid; "
-            "the temperature field the classification was made against. See "
+            "the temperature field the classification was made against (at full "
+            "precision; the stored copy is truncated to 0.01 K). See "
             "temperature_quality for extrapolated pixels."
         )
         tw[:] = np.asarray(classification.tw, dtype="f4")

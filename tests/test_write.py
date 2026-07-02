@@ -81,10 +81,11 @@ def test_write_roundtrip_and_cf(tmp_path):
         for name in ("range", "target_classification", "temperature_quality", "Tw"):
             assert nc.variables[name].filters()["zlib"] is True
 
-        # wet-bulb temperature grid round-trips
+        # wet-bulb temperature grid round-trips (within its 0.01 K truncation)
         tw = nc.variables["Tw"]
         assert tw.units == "K"
-        np.testing.assert_allclose(tw[:], 275.0)
+        assert tw.least_significant_digit == 2
+        np.testing.assert_allclose(tw[:], 275.0, atol=0.005)
 
         # effective boundary: cold base at 300 m in profile 0, fill elsewhere
         irb = nc.variables["ice_rain_boundary"][:]
