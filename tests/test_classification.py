@@ -11,6 +11,7 @@ from ceiloclass.classification import (
     _assemble,
     _despeckle,
     _extend_cold_to_ice,
+    _extend_ice_to_cloud_base,
     _melt_band_below_ice,
     _source_connected,
     _thin_runs,
@@ -155,6 +156,58 @@ def test_extend_cold_to_ice_ignores_disconnected_ice():
     ice[:, 2:5] = True  # ice well below, not touching the cold region
     extended = _extend_cold_to_ice(cold, ice, height)
     assert np.array_equal(extended, cold)  # no contiguous path -> unchanged
+
+
+def test_extend_ice_to_cloud_base_fills_connected_run():
+    n_time, n_gate = 6, 20
+    height = np.arange(n_gate) * 100.0
+    allowed = np.zeros((n_time, n_gate), dtype=bool)
+    allowed[:, 5:16] = True  # one contiguous cold-signal run
+    ice = np.zeros((n_time, n_gate), dtype=bool)
+    ice[:, 12:16] = True  # confirmed ice at the top of the run
+    out = _extend_ice_to_cloud_base(ice, allowed, height)
+    assert out[:, 5:16].all()  # the whole run is ice
+    assert not out[:, :5].any()  # nothing outside the run
+
+
+def test_extend_ice_to_cloud_base_gap_severs_run():
+    n_time, n_gate = 6, 20
+    height = np.arange(n_gate) * 100.0
+    allowed = np.zeros((n_time, n_gate), dtype=bool)
+    allowed[:, 3:8] = True  # lower cold layer, clear air above it
+    allowed[:, 10:16] = True  # upper run holding the ice
+    ice = np.zeros((n_time, n_gate), dtype=bool)
+    ice[:, 13:16] = True
+    out = _extend_ice_to_cloud_base(ice, allowed, height)
+    assert out[:, 10:16].all()  # upper run filled to its base
+    assert not out[:, 3:8].any()  # clear gap: lower layer untouched
+
+
+def test_extend_ice_to_cloud_base_ignores_iceless_run():
+    # A cold layer that touches no ice (e.g. lofted dust) has no seed: unfilled.
+    n_time, n_gate = 6, 20
+    height = np.arange(n_gate) * 100.0
+    allowed = np.zeros((n_time, n_gate), dtype=bool)
+    allowed[:, 3:9] = True
+    ice = np.zeros((n_time, n_gate), dtype=bool)
+    out = _extend_ice_to_cloud_base(ice, allowed, height)
+    assert not out.any()
+
+
+def test_extend_ice_to_cloud_base_clips_transient_deep_run():
+    # One profile where e.g. a dust top touches the cloud base makes a single
+    # deep run; the rolling-median base floor clips it to its neighbours.
+    n_time, n_gate = 21, 20
+    height = np.arange(n_gate) * 100.0
+    allowed = np.zeros((n_time, n_gate), dtype=bool)
+    allowed[:, 8:16] = True
+    allowed[10, 2:16] = True  # transient contact reaching much deeper
+    ice = np.zeros((n_time, n_gate), dtype=bool)
+    ice[:, 12:16] = True
+    out = _extend_ice_to_cloud_base(ice, allowed, height)
+    assert out[0, 8:16].all()  # normal base kept
+    assert not out[10, 2:8].any()  # deep run clipped to the median base
+    assert out[10, 8:16].all()
 
 
 def test_melt_band_below_ice_reaches_t0_from_ice_base():
@@ -613,3 +666,65 @@ def test_classify_weak_signal_is_aerosol():
     )
     assert (cls.target[:, 25] == Target.AEROSOL).all()
     assert cls.strong_beta == 3e-6
+
+
+def test_classify_faint_cirrus_base_recovered_as_ice():
+    # No depol: a faint cirrus deck straddling the -25 degC line. The deep-cold
+    # guard marks only the upper part; the base (between 0 and -25 degC, below
+    # the backscatter threshold) is contiguous with it and must be filled as
+    # ice, not left as a flat aerosol band at the -25 isotherm (the DA10 case).
+    n_time, n_height = 6, 300
+    height = np.arange(n_height) * 30.0
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 150:231] = 8e-7  # faint contiguous deck, 4.5-6.9 km
+    tw = np.tile(285.0 - 0.006 * height, (n_time, 1))  # -25 degC at ~6.1 km
+    cls = classify(_synthetic_ceilo(beta), _model(tw), strong_beta=3e-6)
+    assert (cls.target[:, 210] == Target.ICE).all()  # deep-cold part (guard)
+    assert (cls.target[:, 160] == Target.ICE).all()  # recovered base (fill)
+    assert not (cls.target[:, 150:231] == Target.AEROSOL).any()
+
+
+def test_classify_cold_elevated_aerosol_without_ice_stays_aerosol():
+    # A faint cold elevated aerosol layer (lofted dust reaches ~-19 degC) that
+    # touches no ice has no seed for the fill and must stay aerosol.
+    n_time, n_height = 6, 300
+    height = np.arange(n_height) * 30.0
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 100:141] = 8e-7  # faint layer 3.0-4.2 km, all warmer than -25 degC
+    tw = np.tile(285.0 - 0.006 * height, (n_time, 1))
+    cls = classify(_synthetic_ceilo(beta), _model(tw), strong_beta=3e-6)
+    assert (cls.target[:, 120] == Target.AEROSOL).all()
+    assert not (cls.target == Target.ICE).any()
+
+
+def test_classify_fill_passes_droplet_layer_and_keeps_it_supercooled():
+    # A supercooled liquid layer embedded in the faint cirrus run: the fill
+    # passes through it to the virga below, which becomes ice, while the liquid
+    # gates keep droplet precedence (SUPERCOOLED).
+    n_time, n_height = 6, 300
+    height = np.arange(n_height) * 30.0
+    profile = np.zeros(n_height)
+    profile[150:231] = 8e-7  # faint deck as above
+    profile[181:188] = [5e-7, 1.5e-6, 4e-6, 1.3e-5, 6e-6, 1.2e-6, 8e-7]  # liquid
+    beta = ma.masked_all((n_time, n_height))
+    for t in range(n_time):
+        beta[t, profile > 0] = profile[profile > 0]
+    tw = np.tile(285.0 - 0.006 * height, (n_time, 1))
+    cls = classify(_synthetic_ceilo(beta), _model(tw), strong_beta=3e-6)
+    assert (cls.target[:, 184] == Target.SUPERCOOLED).all()  # the liquid peak
+    assert (cls.target[:, 160] == Target.ICE).all()  # virga below it, recovered
+
+
+def test_classify_depol_path_does_not_fill_low_depol_base():
+    # With depolarization the fill is not used: a faint low-depol band under a
+    # depol-confirmed cirrus stays aerosol (genuine ice virga would depolarize).
+    n_time, n_height = 6, 300
+    height = np.arange(n_height) * 30.0
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 150:231] = 8e-7
+    depol = ma.zeros((n_time, n_height))
+    depol[:, 190:231] = 0.4  # upper part depol-confirmed ice
+    tw = np.tile(285.0 - 0.006 * height, (n_time, 1))
+    cls = classify(_synthetic_ceilo(beta, depol), _model(tw), strong_beta=3e-6)
+    assert (cls.target[:, 210] == Target.ICE).all()
+    assert (cls.target[:, 160] == Target.AEROSOL).all()

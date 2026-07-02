@@ -232,6 +232,7 @@ CASES: list[Case] = [
         "drizzle/cloud by the adaptive threshold.",
         checks=[
             Check("lofted dust is not drizzle", Target.DRIZZLE_OR_RAIN, max_frac=0.03),
+            Check("lofted dust is not ice", Target.ICE, max_frac=0.02),
             Check("aerosol is present", Target.AEROSOL, min_frac=0.02),
         ],
     ),
@@ -249,6 +250,7 @@ CASES: list[Case] = [
                 Target.DRIZZLE_OR_RAIN,
                 max_frac=0.03,
             ),
+            Check("second aerosol mode is not ice", Target.ICE, max_frac=0.02),
             Check("aerosol is present", Target.AEROSOL, min_frac=0.02),
         ],
     ),
@@ -341,6 +343,18 @@ CASES: list[Case] = [
                 min_frac=0.10,
                 hours=(2.0, 18.0),
                 height_m=(6000, 10000),
+            ),
+            Check(
+                # The deck base between the -25 degC line (~6.8 km) and ~5 km is
+                # below the deep-cold guard AND the (capped) backscatter
+                # threshold; only the connectivity fill
+                # (_extend_ice_to_cloud_base) recovers it. Guards against the
+                # flat aerosol boundary at the -25 degC isotherm.
+                "cirrus base below the -25 degC line is ice, not aerosol",
+                Target.ICE,
+                min_frac=0.10,
+                hours=(2.0, 18.0),
+                height_m=(5000, 6800),
             ),
             Check(
                 "the boundary layer is classified (as aerosol)",

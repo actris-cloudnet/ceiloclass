@@ -227,6 +227,10 @@ def classify(
         # lofted dust, which only reaches ~-19 degC even when elevated.
         deep_ice = find_falling(beta, height, tw, cold_limit=DEEP_COLD_LIMIT)
         ice = ice | (cold & deep_ice)
+        # Faint cold signal contiguous with that ice is the same cloud: fill it
+        # as ice too (virga below the deep-cold line / the bright core), see
+        # _extend_ice_to_cloud_base.
+        ice = _extend_ice_to_cloud_base(ice, cold & signal, height)
     # Drizzle/rain is strong warm signal that connects up through continuous
     # signal to a cloud source (see _source_connected); bright warm signal with
     # no cloud above is aerosol, not drizzle (e.g. the cloud-free marine haze at
@@ -346,24 +350,73 @@ def _extend_cold_to_ice(
     extended = _grow_range(cold, ice_like, max_steps, up=False)
     if not (extended & ~cold).any():
         return extended
-    # Lowest cold gate per profile (the ice base); profiles with no ice are NaN
-    # so they are skipped by the windowed median rather than dragging the floor
-    # upward (a window of mostly clear profiles must not clip a neighbour's ice).
-    n_time, n_gate = cold.shape
-    has_cold = extended.any(axis=1)
-    base = np.where(has_cold, np.argmax(extended, axis=1), np.nan)
+    return _clip_to_median_base(cold, extended, smooth_window)
+
+
+def _clip_to_median_base(
+    original: npt.NDArray[np.bool_],
+    extended: npt.NDArray[np.bool_],
+    smooth_window: int,
+) -> npt.NDArray[np.bool_]:
+    """Clip a downward extension of `original` against its rolling-median base.
+
+    Guards against single-profile pillars (a noisy column flooding toward the
+    ground): the per-profile base (lowest True gate of `extended`) is replaced
+    by its rolling median over +/-`smooth_window` profiles, and extension gates
+    below that floor are dropped (`original` itself is never clipped). This keys
+    on the base being an outlier, not on a profile count, so it is insensitive
+    to the time averaging and to clustered pillars (the median tolerates a
+    minority of them). Profiles with nothing in `extended` are NaN and skipped
+    by the windowed median rather than dragging the floor upward; an all-NaN
+    window leaves the floor at 0 (keep the extension), and a profile with a base
+    always contributes its own value, so its mask is never fully clipped.
+    """
+    n_time, n_gate = extended.shape
+    base = np.where(extended.any(axis=1), np.argmax(extended, axis=1), np.nan)
     floor = np.zeros(n_time, dtype=int)
     for t in range(n_time):
-        lo = max(0, t - smooth_window)
-        hi = min(n_time, t + smooth_window + 1)
-        window = base[lo:hi]
-        # All-NaN windows leave floor at 0 (keep the extension); a profile that
-        # has ice always contributes its own non-NaN base here, so its ice is
-        # never fully clipped.
+        window = base[max(0, t - smooth_window) : t + smooth_window + 1]
         if not np.all(np.isnan(window)):
             floor[t] = int(np.ceil(np.nanmedian(window)))
     keep = np.arange(n_gate)[np.newaxis, :] >= floor[:, np.newaxis]
-    return cold | (extended & keep)
+    return original | (extended & keep)
+
+
+def _extend_ice_to_cloud_base(
+    ice: npt.NDArray[np.bool_],
+    allowed: npt.NDArray[np.bool_],
+    height: npt.NDArray[np.floating],
+    *,
+    smooth_window: int = 10,
+) -> npt.NDArray[np.bool_]:
+    """Extend ice through each contiguous cold-signal run that contains ice.
+
+    No-depol instruments only (with depolarization faint ice is confirmed
+    directly). Faint cold signal attached, through unbroken backscatter, to
+    confirmed ice in the same profile is the same cloud -- ice virga hanging
+    below a cirrus deck -- yet on a low-biased instrument (e.g. the DA10 DIAL,
+    ~20% below the CL61) it sits under the cloud threshold, and below the
+    deep-cold line the -25 degC guard cannot recover it either: the deck then
+    ends in a conspicuously flat aerosol boundary at the -25 degC isotherm.
+    Connectivity is calibration-independent, so filling the whole run as ice
+    sidesteps the bias. Not in CloudnetPy, whose radar sees the virga directly.
+
+    The run's own bounds are the physical guards: a clear-air gap or the 0 degC
+    level (via the cold mask in `allowed`) ends the fill, which keeps warm
+    columns ice-free without an altitude floor (that would hurt polar sites,
+    where cold air reaches low); a run-thickness cap would not separate cirrus
+    from dust and is deliberately absent. No upward growth is needed: above the
+    -25 degC line a signal run is already deep-cold ice except gates the
+    speckle filter dropped on purpose. The extension's base is clipped against
+    its rolling median (`_clip_to_median_base`), so a transient single-profile
+    contact between e.g. a dust top and an overlying cloud base cannot flood
+    the dust layer; a cold aerosol run that touches no ice at all is never
+    filled in the first place.
+    """
+    filled = _fill_runs(ice, allowed, height)
+    if not (filled & ~ice).any():
+        return ice
+    return _clip_to_median_base(ice, filled, smooth_window)
 
 
 def _thin_runs(
