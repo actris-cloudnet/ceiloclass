@@ -23,16 +23,19 @@ def _classification() -> Classification:
     false = np.zeros(target.shape, dtype=bool)
     quality = np.zeros(target.shape, dtype=bool)
     quality[:, -1] = True  # top gate extrapolated
+    cold = np.zeros(target.shape, dtype=bool)
+    cold[0, 2:] = True  # profile 0 sub-freezing from gate 2 (300 m) up
     return Classification(
         time=time,
         range=rng,
         target=target,
         droplet=false,
-        cold=false,
+        cold=cold,
         ice=false,
         rain=false,
         aerosol=false,
         quality=quality,
+        tw=np.full(target.shape, 275.0),
         t0_alt=np.array([250.0, np.nan, 300.0]),
         strong_beta=1e-5,
     )
@@ -50,6 +53,8 @@ def test_write_roundtrip_and_cf(tmp_path):
         longitude=14.118,
         location="Lindenberg",
         source_files=["/data/raw_20250624.nc"],
+        instrument="cl61d",
+        used_depolarization=True,
     )
 
     with netCDF4.Dataset(path) as nc:
@@ -73,8 +78,22 @@ def test_write_roundtrip_and_cf(tmp_path):
         assert len(tc.flag_meanings.split()) == len(Target)
 
         # every data variable is zlib-compressed
-        for name in ("range", "target_classification", "temperature_quality"):
+        for name in ("range", "target_classification", "temperature_quality", "Tw"):
             assert nc.variables[name].filters()["zlib"] is True
+
+        # wet-bulb temperature grid round-trips
+        tw = nc.variables["Tw"]
+        assert tw.units == "K"
+        np.testing.assert_allclose(tw[:], 275.0)
+
+        # effective boundary: cold base at 300 m in profile 0, fill elsewhere
+        irb = nc.variables["ice_rain_boundary"][:]
+        assert irb[0] == np.float32(300.0)
+        assert irb.mask[1] and irb.mask[2]
+
+        # provenance attributes
+        assert nc.instrument == "cl61d"
+        assert nc.classification_path == "depolarization"
 
         # time is CF-encoded hours since midnight of the day
         t = nc.variables["time"]
@@ -100,5 +119,6 @@ def test_write_without_optional_metadata(tmp_path):
     with netCDF4.Dataset(path) as nc:
         for absent in ("latitude", "longitude", "altitude", "wavelength"):
             assert absent not in nc.variables
-        assert "location" not in nc.ncattrs()
+        for attr in ("location", "instrument", "classification_path"):
+            assert attr not in nc.ncattrs()
         assert "target_classification" in nc.variables

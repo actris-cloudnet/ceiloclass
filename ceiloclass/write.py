@@ -54,6 +54,8 @@ def write_classification(
     longitude: float | None = None,
     location: str | None = None,
     source_files: Sequence[str | PathLike] | None = None,
+    instrument: str | None = None,
+    used_depolarization: bool | None = None,
 ) -> str:
     """Write a classification to a compressed, CF-1.8 netCDF4 file.
 
@@ -69,6 +71,11 @@ def write_classification(
         location: Human-readable site name, if known.
         source_files: Input files; their base names are recorded in the
             `source_files` global attribute.
+        instrument: Instrument identifier (e.g. "cl61d"), if known; recorded
+            as the `instrument` global attribute.
+        used_depolarization: Whether the depolarization path was used. The
+            classification semantics differ between the two paths, so this is
+            recorded as the `classification_path` global attribute.
 
     Returns:
         The file's UUID (also stored as the `file_uuid` global attribute).
@@ -121,12 +128,45 @@ def write_classification(
         )
         tq[:] = np.asarray(classification.quality, dtype="i1")
 
+        tw = _cvar(nc, "Tw", "f4", ("time", "range"))
+        tw.units = "K"
+        tw.long_name = "Wet-bulb temperature"
+        tw.standard_name = "wet_bulb_temperature"
+        tw.comment = (
+            "Model wet-bulb temperature interpolated onto the observation grid; "
+            "the temperature field the classification was made against. See "
+            "temperature_quality for extrapolated pixels."
+        )
+        tw[:] = np.asarray(classification.tw, dtype="f4")
+
         fill = float(netCDF4.default_fillvals["f4"])
         fl = _cvar(nc, "freezing_level", "f4", ("time",), fill_value=fill)
         fl.units = "m"
         fl.long_name = "Range of the 0 degrees Celsius isotherm above instrument"
+        fl.comment = (
+            "Altitude of the model wet-bulb 0 degC isotherm. On instruments with "
+            "depolarization the classification anchors the effective ice/rain "
+            "boundary to observed ice, so the boundary actually used can depart "
+            "from this model level; see ice_rain_boundary."
+        )
         t0 = np.asarray(classification.t0_alt, dtype="f4")
         fl[:] = np.where(np.isnan(t0), fill, t0)
+
+        irb = _cvar(nc, "ice_rain_boundary", "f4", ("time",), fill_value=fill)
+        irb.units = "m"
+        irb.long_name = "Range of the effective ice/rain boundary above instrument"
+        irb.comment = (
+            "Base of the sub-freezing region the classification actually used: "
+            "equals the freezing level except where depolarization anchored it "
+            "to observed ice or the melt band. Gate-quantized; fill value where "
+            "the whole column is warm."
+        )
+        cold = np.asarray(classification.cold, dtype=bool)
+        rng_m = np.asarray(classification.range, dtype="f4")
+        boundary = np.full(len(time), fill, dtype="f4")
+        has_cold = cold.any(axis=1)
+        boundary[has_cold] = rng_m[np.argmax(cold, axis=1)[has_cold]]
+        irb[:] = boundary
 
         threshold = nc.createVariable("backscatter_threshold", "f4")
         threshold.units = "sr-1 m-1"
@@ -143,6 +183,12 @@ def write_classification(
 
         _write_geolocation(nc, altitude, latitude, longitude)
         _write_global_attributes(nc, midnight, file_uuid, location, source_files)
+        if instrument:
+            nc.instrument = instrument
+        if used_depolarization is not None:
+            nc.classification_path = (
+                "depolarization" if used_depolarization else "no-depolarization"
+            )
 
     return file_uuid
 

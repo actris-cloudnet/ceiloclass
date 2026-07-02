@@ -81,6 +81,7 @@ class Classification:
         cold: Sub-freezing region (above the 0 degC level).
         aerosol: Aerosol (all other signal).
         quality: True where model temperature was extrapolated (lower quality).
+        tw: Model wet-bulb temperature on the (time, range) grid (K).
         t0_alt: Altitude of the 0 degC isotherm per profile (m), time.
         strong_beta: Backscatter threshold used to split cloud/precip from aerosol.
     """
@@ -94,6 +95,7 @@ class Classification:
     rain: npt.NDArray[np.bool_]
     aerosol: npt.NDArray[np.bool_]
     quality: npt.NDArray[np.bool_]
+    tw: npt.NDArray[np.floating]
     t0_alt: npt.NDArray[np.floating]
     strong_beta: float
 
@@ -258,6 +260,7 @@ def classify(
         rain=rain,
         aerosol=aerosol,
         quality=model.extrapolated,
+        tw=tw,
         t0_alt=_find_t0_alt(tw, height),
         strong_beta=strong_beta,
     )
