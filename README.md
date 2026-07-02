@@ -36,6 +36,13 @@ ceiloclass --harmonized -s munich -d 2025-05-25 --show
 ceiloclass -i cl61 ceilo.nc -m model.nc --plot out.png
 ```
 
+Use `-o` to write the classification itself to a compressed, CF-compliant
+netCDF file (combinable with `--plot`/`--show`):
+
+```sh
+ceiloclass -i cl61 ceilo.nc -m model.nc -o classification.nc
+```
+
 `--harmonized` covers every harmonized backscatter instrument at the site —
 ceilometers, PollyXT, DIAL (e.g. the Vaisala DA10), and the experimental
 doppler-lidars — prompting when several are available. Use `-i` to pick one
@@ -69,6 +76,7 @@ ceiloclass -s kenttarova -d 2023-09-04 -a 30 --harmonized -i cl61 -m harmonie-fm
 | `--download-dir`       | Directory for fetched files (default: the package `data/` directory).                                                                                                                                                                                                   |
 | `--calibration-factor` | Override the backscatter calibration factor.                                                                                                                                                                                                                            |
 | `-a`, `--average`      | Average into time bins of this width (seconds) before classifying (faster).                                                                                                                                                                                             |
+| `-o`, `--output`       | Write the classification to this compressed netCDF4 (`.nc`) file.                                                                                                                                                                                                       |
 | `--plot`               | Write a classification plot to this PNG file.                                                                                                                                                                                                                           |
 | `--show`               | Show the plot in a window.                                                                                                                                                                                                                                              |
 | `--max-y`              | Upper limit of the range axis in plots (km).                                                                                                                                                                                                                            |
