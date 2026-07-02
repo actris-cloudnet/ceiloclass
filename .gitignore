@@ -33,5 +33,9 @@ dist/
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+docs/*.bbl
+docs/*.bcf
+docs/*.blg
+docs/*.xml
 docs/*.log
 docs/*.pdf
