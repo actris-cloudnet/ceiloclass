@@ -154,24 +154,19 @@ def _write_geolocation(
     longitude: float | None,
 ) -> None:
     """Add scalar altitude/latitude/longitude variables where known."""
-    if altitude is not None:
-        v = nc.createVariable("altitude", "f4")
-        v.units = "m"
-        v.long_name = "Altitude of site"
-        v.standard_name = "altitude"
-        v[...] = np.float32(altitude)
-    if latitude is not None:
-        v = nc.createVariable("latitude", "f4")
-        v.units = "degree_north"
-        v.long_name = "Latitude of site"
-        v.standard_name = "latitude"
-        v[...] = np.float32(latitude)
-    if longitude is not None:
-        v = nc.createVariable("longitude", "f4")
-        v.units = "degree_east"
-        v.long_name = "Longitude of site"
-        v.standard_name = "longitude"
-        v[...] = np.float32(longitude)
+    fields = (
+        ("altitude", altitude, "m", "Altitude of site"),
+        ("latitude", latitude, "degree_north", "Latitude of site"),
+        ("longitude", longitude, "degree_east", "Longitude of site"),
+    )
+    for name, value, units, long_name in fields:
+        if value is None:
+            continue
+        v = nc.createVariable(name, "f4")
+        v.units = units
+        v.long_name = long_name
+        v.standard_name = name
+        v[...] = np.float32(value)
 
 
 def _write_global_attributes(

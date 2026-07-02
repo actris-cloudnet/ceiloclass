@@ -197,26 +197,24 @@ def _geolocation(
     return latitude, longitude, location
 
 
-def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
-    reader: Callable[..., Ceilo]
-    files: list[str | PathLike]
-    if args.no_rescreen and not args.harmonized:
-        parser.error("--no-rescreen only applies to --harmonized input")
+def _resolve_input(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> tuple[Callable[..., Ceilo], list[str | PathLike]]:
+    """Resolve the reader and input files: local paths, or fetched via --site/--date."""
     if args.files:
         # Local files: we can't introspect them, so the reader must be stated.
+        files = cast("list[str | PathLike]", list(args.files))
         if args.harmonized:
-            reader = read_lidar
-        elif args.instrument in READERS:
-            reader = READERS[args.instrument]
-        elif args.instrument:
+            return read_lidar, files
+        if args.instrument in READERS:
+            return READERS[args.instrument], files
+        if args.instrument:
             parser.error(
                 f"unknown raw instrument {args.instrument!r}; "
                 f"choose from: {', '.join(sorted(READERS))}"
             )
-        else:
-            parser.error("provide -i/--instrument, or --harmonized for a product")
-        files = list(args.files)
-    elif args.site and args.date:
+        parser.error("provide -i/--instrument, or --harmonized for a product")
+    if args.site and args.date:
         if args.harmonized:
             sources = list_harmonized_sources(args.site, args.date, args.instrument)
         else:
@@ -224,13 +222,17 @@ def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         source = _select_source(sources, parser)
         files = cast("list[str | PathLike]", download_source(source, args.download_dir))
         if args.harmonized:
-            reader = read_lidar
-        elif source.reader is not None:
-            reader = READERS[source.reader]
-        else:
-            parser.error(f"no raw reader for instrument: {source.label}")
-    else:
-        parser.error("provide data files, or both --site and --date to fetch them")
+            return read_lidar, files
+        if source.reader is not None:
+            return READERS[source.reader], files
+        parser.error(f"no raw reader for instrument: {source.label}")
+    parser.error("provide data files, or both --site and --date to fetch them")
+
+
+def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    if args.no_rescreen and not args.harmonized:
+        parser.error("--no-rescreen only applies to --harmonized input")
+    reader, files = _resolve_input(args, parser)
     # `rescreen` only exists on the harmonized reader; raw readers don't take it.
     read_kwargs = {"rescreen": not args.no_rescreen} if args.harmonized else {}
     ceilo: Ceilo = reader(files, args.calibration_factor, **read_kwargs)

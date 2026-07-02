@@ -132,23 +132,34 @@ def find_liquid(
     top_above_peak = _n_elements(height, 150)
     beta_diff = ma.array(np.diff(beta, axis=1)).filled(0)
     beta_filled = ma.filled(beta, 0)
+
+    def mark_layer(n: int, base: int, peak: int, min_alt: float) -> None:
+        # Walk the top upward from the peak, validate the bounded layer, raise
+        # its base to cloud strength and mark it as liquid.
+        lprof = beta_filled[n]
+        try:
+            top = min(
+                _ind_top(beta_diff[n], peak, n_height, top_above_peak, 4), n_height - 1
+            )
+        except (IndexError, ValueError):
+            return
+        if not _is_valid_peak(
+            lprof, height, base, peak, top, max_width, min_points, min_top_der, min_alt
+        ):
+            return
+        trimmed = _trim_base_to_strong(lprof, base, peak, strong_beta)
+        if trimmed is not None:
+            is_liquid[n, trimmed : top + 1] = True
+
     is_peak = local_maxima(beta_filled, order=_PEAK_ORDER, axis=1) & (
         beta_filled > peak_amp
     )
     for n, peak in zip(*np.nonzero(is_peak), strict=True):
-        lprof = beta_filled[n]
-        dprof = beta_diff[n]
         try:
-            base = _ind_base(dprof, peak, base_below_peak, 4)
-            top = min(_ind_top(dprof, peak, n_height, top_above_peak, 4), n_height - 1)
+            base = _ind_base(beta_diff[n], peak, base_below_peak, 4)
         except (IndexError, ValueError):
             continue
-        if _is_valid_peak(
-            lprof, height, base, peak, top, max_width, min_points, min_top_der, min_alt
-        ):
-            trimmed = _trim_base_to_strong(lprof, base, peak, strong_beta)
-            if trimmed is not None:
-                is_liquid[n, trimmed : top + 1] = True
+        mark_layer(n, base, peak, min_alt)
 
     # Surface pass: a fog / very-low-stratus layer peaking within the lowest
     # `2 * _PEAK_ORDER` gates is invisible to `local_maxima` (an edge gate is
@@ -160,31 +171,10 @@ def find_liquid(
         for n in range(beta.shape[0]):
             if is_liquid[n, :blind_zone].any():
                 continue
-            lprof = beta_filled[n]
-            if lprof[:blind_zone].max() <= peak_amp:
+            low = beta_filled[n, :blind_zone]
+            if low.max() <= peak_amp:
                 continue
-            peak = int(np.argmax(lprof[:blind_zone]))
-            try:
-                top = min(
-                    _ind_top(beta_diff[n], peak, n_height, top_above_peak, 4),
-                    n_height - 1,
-                )
-            except (IndexError, ValueError):
-                continue
-            if _is_valid_peak(
-                lprof,
-                height,
-                0,
-                peak,
-                top,
-                max_width,
-                min_points,
-                min_top_der,
-                min_alt=0,
-            ):
-                trimmed = _trim_base_to_strong(lprof, 0, peak, strong_beta)
-                if trimmed is not None:
-                    is_liquid[n, trimmed : top + 1] = True
+            mark_layer(n, base=0, peak=int(np.argmax(low)), min_alt=0)
     return is_liquid
 
 
@@ -501,12 +491,16 @@ def _interp_t0_alt(
     return float(height[a] + (T0 - prof[a]) * slope)
 
 
-def _window_count(mask: npt.NDArray[np.bool_], half: int) -> npt.NDArray[np.intp]:
-    """Count True values within +/- `half` gates along the range axis."""
-    cumulative = np.cumsum(mask.astype(int), axis=1)
-    padded = np.pad(cumulative, ((0, 0), (1, 0)))
-    n = mask.shape[1]
+def _window_count(
+    mask: npt.NDArray[np.bool_] | npt.NDArray[np.integer], half: int, axis: int = 1
+) -> npt.NDArray[np.intp]:
+    """Sum values within +/- `half` positions along `axis` (True counts as 1)."""
+    cumulative = np.cumsum(mask.astype(int), axis=axis)
+    pad_width = [(0, 0)] * mask.ndim
+    pad_width[axis] = (1, 0)
+    padded = np.pad(cumulative, pad_width)
+    n = mask.shape[axis]
     idx = np.arange(n)
     hi = np.minimum(idx + half + 1, n)
     lo = np.maximum(idx - half, 0)
-    return padded[:, hi] - padded[:, lo]
+    return np.take(padded, hi, axis=axis) - np.take(padded, lo, axis=axis)

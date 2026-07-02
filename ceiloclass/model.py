@@ -116,6 +116,10 @@ def read_model(
             len(valid),
         )
     kept = np.nonzero(valid)[0]
+    model_time = model_time[valid]
+    ref = model_time[0]
+    model_seconds = _to_seconds(model_time, ref)
+    obs_seconds = _to_seconds(time, ref)
 
     def _to_obs(field: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
         # Stage 1: each model profile onto the obs range. Extrapolate (not clamp)
@@ -134,10 +138,6 @@ def read_model(
         # Stage 2: along time.
         return interpolate_along_time(obs_seconds, model_seconds, on_range)
 
-    model_time = model_time[valid]
-    ref = model_time[0]
-    model_seconds = _to_seconds(model_time, ref)
-    obs_seconds = _to_seconds(time, ref)
     on_grid = {k: _to_obs(v) for k, v in fields.items()}
 
     if wet_bulb is not None:

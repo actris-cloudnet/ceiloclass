@@ -86,17 +86,17 @@ def plot_classification(
         ax = axes[panel]
         panel += 1
         masked = ma.masked_less_equal(ma.array(beta), 0)
-        mesh = ax.pcolormesh(
+        _plot_curtain(
+            fig,
+            ax,
             time,
             rng_km,
-            masked.T,
+            masked,
+            title="Screened backscatter",
+            cbar_label="beta (sr⁻¹ m⁻¹)",
             norm=LogNorm(1e-7, 1e-4),
             cmap="viridis",
-            shading="auto",
         )
-        ax.set_title("Screened backscatter")
-        ax.set_ylabel("Range (km)")
-        fig.colorbar(mesh, ax=ax, label="beta (sr⁻¹ m⁻¹)", pad=0.01)
         _plot_t0(ax, time, t0_km, hide_t0)
 
     if depol is not None:
@@ -108,18 +108,18 @@ def plot_classification(
             masked = ma.masked_where(
                 ma.getmaskarray(ma.masked_less_equal(beta, 0)), masked
             )
-        mesh = ax.pcolormesh(
+        _plot_curtain(
+            fig,
+            ax,
             time,
             rng_km,
-            masked.T,
+            masked,
+            title="Depolarization ratio",
+            cbar_label="depolarization",
             vmin=0,
             vmax=0.5,
             cmap="turbo",
-            shading="auto",
         )
-        ax.set_title("Depolarization ratio")
-        ax.set_ylabel("Range (km)")
-        fig.colorbar(mesh, ax=ax, label="depolarization", pad=0.01)
         _plot_t0(ax, time, t0_km, hide_t0)
 
     ax = axes[-1]
@@ -154,6 +154,24 @@ def plot_classification(
     if show:
         plt.show()
     plt.close(fig)
+
+
+def _plot_curtain(
+    fig: Any,
+    ax: Any,
+    time: npt.NDArray[np.object_],
+    rng_km: npt.NDArray[np.floating],
+    data: ma.MaskedArray,
+    *,
+    title: str,
+    cbar_label: str,
+    **mesh_kwargs: Any,
+) -> None:
+    """Draw one time-range curtain panel with its title, y-label and colorbar."""
+    mesh = ax.pcolormesh(time, rng_km, data.T, shading="auto", **mesh_kwargs)
+    ax.set_title(title)
+    ax.set_ylabel("Range (km)")
+    fig.colorbar(mesh, ax=ax, label=cbar_label, pad=0.01)
 
 
 def _plot_beta_hist(

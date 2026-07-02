@@ -24,8 +24,10 @@ from .detection import (
     ICE_DEPOL_LIMIT,
     _fill_runs,
     _find_t0_alt,
+    _grow_range,
     _iter_runs,
     _n_elements,
+    _window_count,
     correct_supercooled,
     fill_thin_clouds,
     find_depol_ice,
@@ -167,6 +169,8 @@ def classify(
     if strong_beta is None:
         strong_beta = _adaptive_strong_beta(beta)
 
+    signal = ~beta_mask
+    bright = signal & (ma.filled(beta, 0.0) > strong_beta)
     freezing = find_freezing_region(tw, height)
     cold = freezing
     droplet = find_liquid(
@@ -176,47 +180,24 @@ def classify(
     blocked = find_falling(beta, height, tw)
     ice_like = None
     if depol is not None:
-        # CL61 only: strong depolarization marks ice, not liquid droplets.
-        ice_like = find_depol_ice(depol, beta_mask, ice_depol_limit=ice_depol_limit)
-        # ...except inside a liquid layer, where rising depolarization is MULTIPLE
-        # SCATTERING, not ice -- a flat threshold would carve out its densest part.
-        # Identify genuine liquid layers (those with a low-depol single-scattering
-        # part, which pure ice lacks) and shield each whole layer, plus a short
-        # scattering tail above it (ms_tail), from the depol veto.
-        liquid = _fill_runs(droplet & ~ice_like, droplet, height)
-        ms_protected = grow_liquid(
-            liquid, ~beta_mask, blocked, height, grow_up=ms_tail, grow_down=0.0
+        droplet, ice_like, cold = _depol_adjustments(
+            depol,
+            droplet,
+            blocked,
+            freezing,
+            bright,
+            beta_mask,
+            height,
+            ice_depol_limit=ice_depol_limit,
+            ms_tail=ms_tail,
         )
-        ice_like = ice_like & ~ms_protected
-        droplet = droplet & ~ice_like
-        # With depolarization we know ice directly, so it -- not find_falling's
-        # -15 degC / 2000 m heuristic -- is the barrier to liquid growth. That
-        # heuristic would otherwise cut a genuine supercooled cloud top off at
-        # altitude (e.g. at high-elevation Troll, where the layer sits near the
-        # 2000 m line); depolarization keeps growth out of real ice instead.
-        # find_falling stays the barrier only for instruments without depol.
+        # Depol-confirmed ice, not find_falling's altitude/temperature heuristic,
+        # is the barrier to liquid growth (see _depol_adjustments).
         blocked = ice_like
-        # Anchor the freezing region to observed falling ice (see
-        # _extend_cold_to_ice), flooding only through CLOUD-STRENGTH, SOLID ice.
-        # Cloud-strength (beta > strong_beta) excludes a daytime boundary layer of
-        # weakly-backscattering yet strongly-depolarizing aerosol (dust, pollen).
-        # The ice-core depol limit (not the lower ice/liquid limit) marks SOLID
-        # ice: as ice falls past the melting level depolarization drops from solid
-        # ice ~0.4-0.5 to the ~0.2 of the wet/rain shaft below it. Flooding the
-        # freezing region down only through solid ice therefore STOPS at that phase
-        # change, instead of running on through the still-depolarizing rain below
-        # 0 degC (which would drag ice far into warm air). This higher limit is for
-        # the downward extension only: above the 0 degC line a 0.2 depol is still
-        # cold ice, not rain (see the melt-band block below).
-        ice_core = ice_like & (ma.filled(depol, 0.0) > ICE_CORE_DEPOL_LIMIT)
-        strong_ice = ice_core & (ma.filled(beta, 0.0) > strong_beta)
-        cold = _extend_cold_to_ice(freezing, strong_ice, height)
     droplet = fill_thin_clouds(droplet, ~beta_mask, blocked, height)
     droplet = grow_liquid(droplet, ~beta_mask, blocked, height)
     droplet = correct_supercooled(droplet, tw)
 
-    signal = ~beta_mask
-    bright = signal & (ma.filled(beta, 0.0) > strong_beta)
     if ice_like is not None:
         # CL61 only: a depol-confirmed ice base sitting ABOVE the model 0 degC line
         # means the real melting level is higher than the model t0 (biased low):
@@ -278,6 +259,66 @@ def classify(
     )
 
 
+def _depol_adjustments(
+    depol: ma.MaskedArray,
+    droplet: npt.NDArray[np.bool_],
+    blocked: npt.NDArray[np.bool_],
+    freezing: npt.NDArray[np.bool_],
+    bright: npt.NDArray[np.bool_],
+    beta_mask: npt.NDArray[np.bool_],
+    height: npt.NDArray[np.floating],
+    *,
+    ice_depol_limit: float,
+    ms_tail: float,
+) -> tuple[
+    npt.NDArray[np.bool_],
+    npt.NDArray[np.bool_],
+    npt.NDArray[np.bool_],
+]:
+    """Use depolarization (CL61 only) to split ice from liquid and anchor cold air.
+
+    Strong depolarization marks ice, not liquid droplets -- except inside a
+    liquid layer, where rising depolarization is MULTIPLE SCATTERING, not ice; a
+    flat threshold would carve out the layer's densest part. Genuine liquid
+    layers (those with a low-depol single-scattering part, which pure ice lacks)
+    are therefore shielded from the depol veto as a whole, plus a short
+    scattering tail above them (`ms_tail`).
+
+    The freezing region is then anchored to observed falling ice (see
+    `_extend_cold_to_ice`), flooding only through CLOUD-STRENGTH, SOLID ice.
+    Cloud-strength (`bright`) excludes a daytime boundary layer of
+    weakly-backscattering yet strongly-depolarizing aerosol (dust, pollen). The
+    ice-core depol limit (not the lower ice/liquid limit) marks SOLID ice: as
+    ice falls past the melting level depolarization drops from solid ice
+    ~0.4-0.5 to the ~0.2 of the wet/rain shaft below it. Flooding the freezing
+    region down only through solid ice therefore STOPS at that phase change,
+    instead of running on through the still-depolarizing rain below 0 degC
+    (which would drag ice far into warm air). This higher limit is for the
+    downward extension only: above the 0 degC line a 0.2 depol is still cold
+    ice, not rain (see the melt-band block in `classify`).
+
+    Returns:
+        Updated ``(droplet, ice_like, cold)`` masks. The caller should also make
+        `ice_like` the barrier to liquid growth: with depolarization we know ice
+        directly, so it -- not `find_falling`'s -15 degC / 2000 m heuristic --
+        blocks growth. That heuristic would otherwise cut a genuine supercooled
+        cloud top off at altitude (e.g. at high-elevation Troll, where the layer
+        sits near the 2000 m line); depolarization keeps growth out of real ice
+        instead. `find_falling` stays the barrier only for instruments without
+        depol.
+    """
+    ice_like = find_depol_ice(depol, beta_mask, ice_depol_limit=ice_depol_limit)
+    liquid = _fill_runs(droplet & ~ice_like, droplet, height)
+    ms_protected = grow_liquid(
+        liquid, ~beta_mask, blocked, height, grow_up=ms_tail, grow_down=0.0
+    )
+    ice_like = ice_like & ~ms_protected
+    droplet = droplet & ~ice_like
+    ice_core = ice_like & (ma.filled(depol, 0.0) > ICE_CORE_DEPOL_LIMIT)
+    cold = _extend_cold_to_ice(freezing, ice_core & bright, height)
+    return droplet, ice_like, cold
+
+
 def _extend_cold_to_ice(
     cold: npt.NDArray[np.bool_],
     ice_like: npt.NDArray[np.bool_],
@@ -301,17 +342,8 @@ def _extend_cold_to_ice(
     so it is insensitive to the time averaging and to clustered pillars (the
     median tolerates a minority of them).
     """
-    gate_m = float(np.median(np.diff(np.asarray(height, dtype=float))))
-    max_steps = max(int(round(max_depth / gate_m)), 1)
-    extended = cold.copy()
-    above = np.zeros_like(cold)
-    for _ in range(max_steps):
-        above[:, :-1] = extended[:, 1:]
-        above[:, -1] = False
-        newly = above & ice_like & ~extended
-        if not newly.any():
-            break
-        extended |= newly
+    max_steps = max(_n_elements(height, max_depth), 1)
+    extended = _grow_range(cold, ice_like, max_steps, up=False)
     if not (extended & ~cold).any():
         return extended
     # Lowest cold gate per profile (the ice base); profiles with no ice are NaN
@@ -378,27 +410,15 @@ def _melt_band_below_ice(
     is therefore treated as part of the band, while a thick, coherent ice cloud
     still blocks. Each flood is capped at `max_depth`.
     """
-    gate_m = float(np.median(np.diff(np.asarray(height, dtype=float))))
-    max_steps = max(int(round(max_depth / gate_m)), 1)
+    max_steps = max(_n_elements(height, max_depth), 1)
     # The melting enhancement is a thin ice_like run; bridge it but keep thick ice
     # (the real cloud) as a barrier.
     thin_ice = _thin_runs(ice_like, height, bridge)
     passable = freezing & bright & (~ice_like | thin_ice)
-    down = ice_like & freezing  # seed: the depol ice base and above
-    up = ~freezing  # seed: the warm region below t0
-    nbelow = np.zeros_like(passable)
-    nabove = np.zeros_like(passable)
-    for _ in range(max_steps):
-        nbelow[:, :-1] = down[:, 1:]
-        nbelow[:, -1] = False
-        nabove[:, 1:] = up[:, :-1]
-        nabove[:, 0] = False
-        new_down = nbelow & passable & ~down
-        new_up = nabove & passable & ~up
-        if not (new_down.any() or new_up.any()):
-            break
-        down |= new_down
-        up |= new_up
+    # Flood down from the depol ice base, up from the warm region below t0; the
+    # band is where the two floods meet.
+    down = _grow_range(ice_like & freezing, passable, max_steps, up=False)
+    up = _grow_range(~freezing, passable, max_steps, up=True)
     return down & up & passable
 
 
@@ -567,20 +587,9 @@ def _despeckle(
     """
     if min_neighbours <= 1:
         return target
-    classified = (target != Target.CLEAR).astype(int)
-    cumulative = np.pad(np.cumsum(classified, axis=0), ((1, 0), (0, 0)))
-    n_time = target.shape[0]
-    t_idx = np.arange(n_time)
-    t_hi = np.minimum(t_idx + 2, n_time)
-    t_lo = np.maximum(t_idx - 1, 0)
-    t_sum = cumulative[t_hi] - cumulative[t_lo]
-    cumulative = np.pad(np.cumsum(t_sum, axis=1), ((0, 0), (1, 0)))
-    n_gate = target.shape[1]
-    g_idx = np.arange(n_gate)
-    g_hi = np.minimum(g_idx + 2, n_gate)
-    g_lo = np.maximum(g_idx - 1, 0)
-    counts = cumulative[:, g_hi] - cumulative[:, g_lo]
-    speckle = (target != Target.CLEAR) & (counts < min_neighbours)
+    classified = target != Target.CLEAR
+    counts = _window_count(_window_count(classified, half=1, axis=0), half=1, axis=1)
+    speckle = classified & (counts < min_neighbours)
     return np.where(speckle, Target.CLEAR, target)
 
 
