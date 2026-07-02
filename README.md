@@ -40,7 +40,7 @@ Use `-o` to write the classification itself to a compressed, CF-compliant
 netCDF file (combinable with `--plot`/`--show`):
 
 ```sh
-ceiloclass -i cl61 ceilo.nc -m model.nc -o classification.nc
+ceiloclass --harmonized -i cl61 -s kenttarova -d 2023-09-04 -a 30 -o classification.nc
 ```
 
 `--harmonized` covers every harmonized backscatter instrument at the site —
