@@ -4,9 +4,9 @@
       "something is classified": 0.7723
     },
     "fractions": {
-      "AEROSOL": 0.21107,
+      "AEROSOL": 0.21097,
       "CLEAR": 0.7723,
-      "DRIZZLE_OR_RAIN": 0.00271,
+      "DRIZZLE_OR_RAIN": 0.00282,
       "DROPLET": 0.00616,
       "ICE": 0.00494,
       "SUPERCOOLED": 0.00281
@@ -33,14 +33,14 @@
   },
   "granada-dust": {
     "checks": {
-      "aerosol is present": 0.11054,
-      "lofted dust is not drizzle": 0.00131,
+      "aerosol is present": 0.11029,
+      "lofted dust is not drizzle": 0.00156,
       "lofted dust is not ice": 0.00654
     },
     "fractions": {
-      "AEROSOL": 0.11054,
+      "AEROSOL": 0.11029,
       "CLEAR": 0.87356,
-      "DRIZZLE_OR_RAIN": 0.00131,
+      "DRIZZLE_OR_RAIN": 0.00156,
       "DROPLET": 0.00034,
       "ICE": 0.00654,
       "SUPERCOOLED": 0.0077
@@ -48,14 +48,30 @@
     "strong_beta": 4.18e-6,
     "t0_median": 3453.8
   },
-  "kenttarova-drizzle": {
+  "kenttarova-broken-cumulus": {
     "checks": {
-      "real sub-cloud drizzle is retained": 0.01343
+      "morning drizzle shafts are kept whole": 0.73631,
+      "the cloud-free morning boundary layer stays aerosol": 0.54935
     },
     "fractions": {
-      "AEROSOL": 0.04165,
+      "AEROSOL": 0.03682,
+      "CLEAR": 0.89545,
+      "DRIZZLE_OR_RAIN": 0.04124,
+      "DROPLET": 0.02419,
+      "ICE": 9e-5,
+      "SUPERCOOLED": 0.00221
+    },
+    "strong_beta": 1.26e-6,
+    "t0_median": 2629.9
+  },
+  "kenttarova-drizzle": {
+    "checks": {
+      "real sub-cloud drizzle is retained": 0.01374
+    },
+    "fractions": {
+      "AEROSOL": 0.04134,
       "CLEAR": 0.90618,
-      "DRIZZLE_OR_RAIN": 0.01343,
+      "DRIZZLE_OR_RAIN": 0.01374,
       "DROPLET": 0.01008,
       "ICE": 0.02054,
       "SUPERCOOLED": 0.00812
@@ -97,14 +113,14 @@
   },
   "lindenberg-da10-dial": {
     "checks": {
-      "evening sub-cloud precipitation is drizzle/rain": 0.17636,
+      "evening sub-cloud precipitation is drizzle/rain": 0.17904,
       "high cirrus aloft is ice": 0.09196,
-      "the boundary layer is classified (as aerosol)": 0.95309
+      "the boundary layer is classified (as aerosol)": 0.9524
     },
     "fractions": {
-      "AEROSOL": 0.13483,
+      "AEROSOL": 0.13475,
       "CLEAR": 0.82671,
-      "DRIZZLE_OR_RAIN": 0.00661,
+      "DRIZZLE_OR_RAIN": 0.00668,
       "DROPLET": 0.00279,
       "ICE": 0.02644,
       "SUPERCOOLED": 0.00263
@@ -118,7 +134,7 @@
       "no fake ice column in the warm boundary layer": 0.0
     },
     "fractions": {
-      "AEROSOL": 0.0898,
+      "AEROSOL": 0.08979,
       "CLEAR": 0.8615,
       "DRIZZLE_OR_RAIN": 0.00131,
       "DROPLET": 0.00073,
@@ -134,9 +150,9 @@
       "the melt band below the ice base is drizzle/rain": 0.24823
     },
     "fractions": {
-      "AEROSOL": 0.09822,
+      "AEROSOL": 0.09806,
       "CLEAR": 0.86623,
-      "DRIZZLE_OR_RAIN": 0.01262,
+      "DRIZZLE_OR_RAIN": 0.01278,
       "DROPLET": 0.008,
       "ICE": 0.0082,
       "SUPERCOOLED": 0.00674
@@ -150,9 +166,9 @@
       "no spurious ice below the melting level": 0.0
     },
     "fractions": {
-      "AEROSOL": 0.03634,
+      "AEROSOL": 0.0363,
       "CLEAR": 0.94347,
-      "DRIZZLE_OR_RAIN": 0.00227,
+      "DRIZZLE_OR_RAIN": 0.00231,
       "DROPLET": 0.01791,
       "ICE": 0.0,
       "SUPERCOOLED": 0.0
@@ -162,13 +178,13 @@
   },
   "mindelo-marine-haze": {
     "checks": {
-      "marine haze is not drizzle": 0.05073,
-      "the surface layer is classified (as aerosol)": 0.89548
+      "marine haze is not drizzle": 0.07396,
+      "the surface layer is classified (as aerosol)": 0.87225
     },
     "fractions": {
-      "AEROSOL": 0.13193,
+      "AEROSOL": 0.13045,
       "CLEAR": 0.8607,
-      "DRIZZLE_OR_RAIN": 0.00322,
+      "DRIZZLE_OR_RAIN": 0.0047,
       "DROPLET": 0.00239,
       "ICE": 0.00021,
       "SUPERCOOLED": 0.00154
@@ -195,12 +211,12 @@
   "nyalesund-cloudy-arctic": {
     "checks": {
       "liquid clouds are detected": 0.01903,
-      "sub-cloud drizzle is detected": 0.01245
+      "sub-cloud drizzle is detected": 0.01279
     },
     "fractions": {
-      "AEROSOL": 0.01921,
+      "AEROSOL": 0.01887,
       "CLEAR": 0.94376,
-      "DRIZZLE_OR_RAIN": 0.01245,
+      "DRIZZLE_OR_RAIN": 0.01279,
       "DROPLET": 0.01903,
       "ICE": 0.00189,
       "SUPERCOOLED": 0.00366

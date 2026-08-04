@@ -12,6 +12,7 @@ from ceiloclass.classification import (
     _despeckle,
     _extend_cold_to_ice,
     _extend_ice_to_cloud_base,
+    _flood_connected,
     _melt_band_below_ice,
     _source_connected,
     _thin_runs,
@@ -646,6 +647,45 @@ def test_source_connected_bridges_small_gap_not_large():
     assert _source_connected(cloud, signal, 0, max_gap=3)[0, 5]  # bridged
     signal[0, 8:13] = False  # widen to a 5-gate gap
     assert not _source_connected(cloud, signal, 0, max_gap=3)[0, 5]  # too wide
+
+
+def test_flood_connected_fills_region_not_diagonal_or_detached():
+    allowed = np.zeros((5, 5), dtype=bool)
+    allowed[0:3, 1] = True  # an L-shaped region...
+    allowed[2, 1:4] = True
+    allowed[3, 4] = True  # ...touching this only diagonally
+    allowed[4, 0] = True  # and a detached pixel
+    seed = np.zeros_like(allowed)
+    seed[0, 1] = True
+    out = _flood_connected(seed, allowed)
+    assert out[0:3, 1].all() and out[2, 1:4].all()  # the whole L is filled
+    assert not out[3, 4]  # diagonal contact is not connectivity
+    assert not out[4, 0]  # detached region untouched
+
+
+def test_classify_drizzle_shaft_under_broken_cloud_stays_whole():
+    # A drizzle shaft under a broken cloud deck: the signal path from shaft to
+    # cloud is only continuous in some profiles, but the shaft is one contiguous
+    # bright region. The source gate must decide per shaft, not shred it into
+    # per-profile drizzle/aerosol stripes (the Kenttarova cumulus case) -- while
+    # a cloud-free bright layer merely touching the shaft in time (the Mindelo
+    # haze) must stay aerosol.
+    n_time, n_height = 9, 200
+    cloud = [5e-7, 1.5e-6, 4e-6, 1.3e-5, 6e-6, 1.2e-6, 3e-7]
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 20:36] = 5e-6  # the bright warm shaft, in every profile
+    beta[:6, 60:67] = cloud  # cloud above, first six profiles
+    beta[:3, 36:60] = 8e-7  # continuous bridge to the cloud, first three only
+    # profiles 3-5: a wide screened gap (gates 36:60, way over the bridgeable
+    # notch) severs the shaft from its cloud; profiles 6-8: no cloud at all.
+    model = _model(np.full((n_time, n_height), 290.0))
+    cls = classify(_synthetic_ceilo(beta), model, strong_beta=3e-6)
+    assert (cls.target[:6, 63] == Target.DROPLET).all()  # the cloud deck
+    assert (cls.target[:3, 28] == Target.DRIZZLE_OR_RAIN).all()  # sourced
+    # severed profiles ride the shaft: cloud above + connected to sourced rain
+    assert (cls.target[3:6, 28] == Target.DRIZZLE_OR_RAIN).all()
+    # cloud-free profiles touching the shaft do not: haze stays aerosol
+    assert (cls.target[6:, 28] == Target.AEROSOL).all()
 
 
 def test_classify_drizzle_bridges_thin_melt_gap():

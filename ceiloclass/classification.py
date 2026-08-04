@@ -145,8 +145,14 @@ def classify(
             mask by +/- that many profiles in time first, recovering drizzle at a
             ragged cloud edge where the base flickers out for a profile -- but keep
             it small: a wide window re-admits cloud-free bright aerosol as drizzle
-            wherever a cloud passes within the window. A negative value disables
-            the gate entirely (any bright warm signal is drizzle).
+            wherever a cloud passes within the window. The gate decides per
+            shaft, not per pixel: gated rain is flooded through the
+            2D-connected strong warm pixels that have a cloud above them in
+            their own profile (see `_flood_connected` and the comment at the
+            call site), so a broken cloud deck whose source path flickers
+            profile to profile does not shred the shaft into drizzle/aerosol
+            stripes. A negative value disables the gate entirely (any bright
+            warm signal is drizzle).
         find_surface_liquid: Detect fog / low stratus from the lowest range gates
             (the surface pass of `find_liquid`). Disable it when the instrument's
             near-surface overlap correction is unreliable and would otherwise flag
@@ -239,12 +245,29 @@ def classify(
     # Mindelo).
     rain = strong & ~cold
     if drizzle_source_window >= 0:
-        rain &= _source_connected(
+        sourced = rain & _source_connected(
             droplet | ice,
             signal,
             drizzle_source_window,
             max_gap=_n_elements(height, DRIZZLE_SOURCE_MAX_GAP),
         )
+        # A precipitation shaft under a broken cloud deck is one contiguous
+        # bright region, but the per-pixel source path flickers (the cloud base
+        # drops out of detection, or a screened gap severs the column), so the
+        # strict gate shreds the shaft into drizzle/aerosol stripes. Let the
+        # gate decide per shaft instead: flood the sourced rain through the
+        # 2D-connected strong warm region, but only across pixels that have a
+        # cloud somewhere above them in their own profile (continuity to it no
+        # longer required). That confinement keeps the flood out of a
+        # persistent cloud-free bright layer (the Mindelo haze, one connected
+        # region spanning the whole day) that touches a genuine drizzle column
+        # somewhere; a fully attenuated profile inside a shaft still rides on
+        # the `sourced` pixels themselves being passable.
+        cloud_above = np.zeros_like(rain)
+        cloud_above[:, :-1] = (
+            np.cumsum((droplet | ice)[:, ::-1], axis=1)[:, ::-1][:, 1:] > 0
+        )
+        rain = _flood_connected(sourced, rain & (sourced | cloud_above))
     aerosol = signal & ~droplet & ~ice & ~rain
 
     target = _assemble(droplet, cold, ice, rain, aerosol)
@@ -476,6 +499,39 @@ def _melt_band_below_ice(
     down = _grow_range(ice_like & freezing, passable, max_steps, up=False)
     up = _grow_range(~freezing, passable, max_steps, up=True)
     return down & up & passable
+
+
+def _flood_connected(
+    seed: npt.NDArray[np.bool_],
+    allowed: npt.NDArray[np.bool_],
+) -> npt.NDArray[np.bool_]:
+    """Flood `seed` through 4-connected `allowed` pixels (time-range).
+
+    Marks every `allowed` pixel whose connected region contains a seed. Runs
+    alternating full-line fills along range and time (each pass fills whole
+    contiguous runs, not single steps) until a fixpoint, so convergence takes a
+    few passes even for shafts spanning hours.
+    """
+    grown = seed & allowed
+    while True:
+        prev = grown
+        grown = _fill_axis_runs(grown, allowed)
+        grown = _fill_axis_runs(grown.T, allowed.T).T
+        if (grown == prev).all():
+            return grown
+
+
+def _fill_axis_runs(
+    seed: npt.NDArray[np.bool_],
+    allowed: npt.NDArray[np.bool_],
+) -> npt.NDArray[np.bool_]:
+    """Fill each contiguous run of `allowed` along the last axis that has a seed."""
+    out = seed.copy()
+    for i in np.nonzero(seed.any(axis=1))[0]:
+        for j, k in _iter_runs(allowed[i]):
+            if seed[i, j:k].any():
+                out[i, j:k] = True
+    return out
 
 
 def _source_connected(

@@ -218,6 +218,34 @@ CASES: list[Case] = [
         ],
     ),
     Case(
+        id="kenttarova-broken-cumulus",
+        site="kenttarova",
+        date="2023-08-02",
+        instrument="cl31",
+        note="Drizzle shafts under a broken cumulus deck: the per-profile source "
+        "path flickers (cloud base drops out of detection), which used to shred "
+        "the shafts into drizzle/aerosol stripes; the shaft-level flood must "
+        "keep them whole while the morning aerosol layer stays aerosol.",
+        checks=[
+            Check(
+                # The striped (per-profile gated) output measures ~44% here, the
+                # shaft-level flood ~74%: the floor sits between the two.
+                "morning drizzle shafts are kept whole",
+                Target.DRIZZLE_OR_RAIN,
+                min_frac=0.55,
+                hours=(9.5, 12.0),
+                height_m=(100, 900),
+            ),
+            Check(
+                "the cloud-free morning boundary layer stays aerosol",
+                Target.AEROSOL,
+                min_frac=0.30,
+                hours=(0.0, 5.0),
+                height_m=(0, 500),
+            ),
+        ],
+    ),
+    Case(
         id="troll-polar-ice",
         site="troll",
         date="2026-05-09",
