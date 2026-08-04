@@ -52,7 +52,9 @@ def plot_classification(
     if not show:
         matplotlib.use("Agg")  # headless: no display needed for saving
 
-    time = classification.time
+    # Matplotlib date numbers: pcolorfast needs numeric coordinates, and the
+    # t0 line uses the same units so everything stays aligned.
+    time = mdates.date2num(classification.time)
     # Only render up to the displayed height — plotting all gates (CL61 reaches
     # ~15 km) is the main cost even when viewing the lowest few km.
     keep = np.asarray(classification.range) <= max_height * 1.05
@@ -123,13 +125,15 @@ def plot_classification(
         _plot_t0(ax, time, t0_km, hide_t0)
 
     ax = axes[-1]
-    mesh = ax.pcolormesh(time, rng_km, target.T, cmap=cmap, norm=norm, shading="auto")
+    mesh = ax.pcolorfast(_edges(time), _edges(rng_km), target.T, cmap=cmap, norm=norm)
     _plot_t0(ax, time, t0_km, hide_t0)
     ax.set_title("Target classification")
     ax.set_ylabel("Range (km)")
     ax.set_xlabel("Time (UTC)")
     # Show only the hour:minute on the shared time axis; the date is redundant
-    # (a single day) and clutters the labels.
+    # (a single day) and clutters the labels. The locator must be set explicitly
+    # since the numeric pcolorfast coordinates don't install date units.
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     ax.set_ylim(0, min(max_height / 1000, rng_km.max()))
     cbar = fig.colorbar(mesh, ax=ax, ticks=range(len(Target)), pad=0.01)
@@ -156,10 +160,19 @@ def plot_classification(
     plt.close(fig)
 
 
+def _edges(centers: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+    """Cell edges (n+1) around 1-D cell `centers`, as `shading="auto"` computes."""
+    c = np.asarray(centers, dtype=float)
+    if c.size == 1:
+        return np.array([c[0] - 0.5, c[0] + 0.5])
+    mid = (c[:-1] + c[1:]) / 2
+    return np.r_[2 * c[0] - mid[0], mid, 2 * c[-1] - mid[-1]]
+
+
 def _plot_curtain(
     fig: Any,
     ax: Any,
-    time: npt.NDArray[np.object_],
+    time: npt.NDArray[np.floating],
     rng_km: npt.NDArray[np.floating],
     data: ma.MaskedArray,
     *,
@@ -167,8 +180,13 @@ def _plot_curtain(
     cbar_label: str,
     **mesh_kwargs: Any,
 ) -> None:
-    """Draw one time-range curtain panel with its title, y-label and colorbar."""
-    mesh = ax.pcolormesh(time, rng_km, data.T, shading="auto", **mesh_kwargs)
+    """Draw one time-range curtain panel with its title, y-label and colorbar.
+
+    Uses `pcolorfast` (image-based, an order of magnitude faster to draw than
+    `pcolormesh`'s per-cell quads on a full-day curtain); explicit cell edges
+    keep it exact on a jittery time grid.
+    """
+    mesh = ax.pcolorfast(_edges(time), _edges(rng_km), data.T, **mesh_kwargs)
     ax.set_title(title)
     ax.set_ylabel("Range (km)")
     fig.colorbar(mesh, ax=ax, label=cbar_label, pad=0.01)
@@ -195,7 +213,11 @@ def _plot_beta_hist(
     lo = float(np.percentile(values, 0.5))
     hi = float(values.max())
     bins = np.logspace(np.log10(lo), np.log10(hi), 100)
-    ax.hist(values, bins=bins, color="#1f77b4", edgecolor="white", linewidth=0.3)
+    counts, _ = np.histogram(values, bins=bins)
+    # A single stairs artist draws far faster than ax.hist's per-bin patches.
+    ax.stairs(
+        counts, bins, fill=True, color="#1f77b4", edgecolor="white", linewidth=0.3
+    )
     ax.set_xscale("log")
     ax.set_xlim(lo, hi)
     if threshold is not None:
@@ -213,7 +235,7 @@ def _plot_beta_hist(
 
 def _plot_t0(
     ax: Any,
-    time: npt.NDArray[np.object_],
+    time: npt.NDArray[np.floating],
     t0_km: npt.NDArray[np.floating],
     hide: bool = False,
 ) -> None:
