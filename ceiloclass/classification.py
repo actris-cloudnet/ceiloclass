@@ -57,6 +57,28 @@ so that notch does not sever a drizzle column from its cloud and drop it to
 aerosol. Stays well below the kilometre-scale clear air that must still reject an
 unconnected near-surface layer (e.g. Mindelo haze under a distant cirrus)."""
 
+DEEP_RAIN_THICKNESS = 2000.0
+"""A contiguous cloud-strength warm column at least this deep is rain (m).
+
+Heavy rain extinguishes the lidar beam below the melting level, so neither the
+parent ice nor a liquid/bright-band peak survives to be detected and the
+column itself is the only evidence left. Aerosol does not sustain
+cloud-strength backscatter over kilometres of depth -- the thickest genuine
+aerosol runs across the regression days are ~0.74 km (Mindelo marine haze) and
+~0.85 km (Granada dust) -- while attenuated rain columns run 2.5-3.8 km
+(Juelich) or reach the ground at 1.3-1.9 km (Kenttarova). A run this deep is
+therefore precipitation in its own right and seeds the drizzle flood even with
+nothing detected above it."""
+
+DEEP_RAIN_PASSABLE_THICKNESS = 1200.0
+"""Column depth that makes a warm-strong run passable to the drizzle flood (m).
+
+Weaker sibling of `DEEP_RAIN_THICKNESS`: a run this deep is not proof of rain
+on its own (it stays aerosol in isolation) but is admitted into a shaft when
+2D-connected to sourced rain -- an attenuated ground-reaching column beside a
+sourced one. Sits above the thickest genuine aerosol runs observed (~0.85 km)
+so a haze or dust layer touching a drizzle shaft still cannot ride the flood."""
+
 
 class Target(IntEnum):
     """Target classification categories."""
@@ -251,6 +273,10 @@ def classify(
             drizzle_source_window,
             max_gap=_n_elements(height, DRIZZLE_SOURCE_MAX_GAP),
         )
+        # Columns deep enough to be rain on the evidence of their depth alone
+        # (fully attenuated profiles, nothing detectable above them) also seed
+        # the flood; see DEEP_RAIN_THICKNESS.
+        sourced |= rain & ~_thin_runs(rain, height, DEEP_RAIN_THICKNESS)
         # A precipitation shaft under a broken cloud deck is one contiguous
         # bright region, but the per-pixel source path flickers (the cloud base
         # drops out of detection, or a screened gap severs the column), so the
@@ -263,11 +289,19 @@ def classify(
         # region spanning the whole day) that touches a genuine drizzle column
         # somewhere; a fully attenuated profile inside a shaft still rides on
         # the `sourced` pixels themselves being passable.
+        # Runs deep enough to plausibly be attenuated rain (though not deep
+        # enough to prove it, see DEEP_RAIN_PASSABLE_THICKNESS) are passable
+        # too, so a ground-reaching column beside a sourced one joins the shaft.
         cloud_above = np.zeros_like(rain)
         cloud_above[:, :-1] = (
             np.cumsum((droplet | ice)[:, ::-1], axis=1)[:, ::-1][:, 1:] > 0
         )
-        rain = _flood_connected(sourced, rain & (sourced | cloud_above))
+        passable = (
+            sourced
+            | cloud_above
+            | ~_thin_runs(rain, height, DEEP_RAIN_PASSABLE_THICKNESS)
+        )
+        rain = _flood_connected(sourced, rain & passable)
     aerosol = signal & ~droplet & ~ice & ~rain
 
     target = _assemble(droplet, cold, ice, rain, aerosol)

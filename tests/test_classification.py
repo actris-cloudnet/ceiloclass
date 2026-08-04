@@ -688,6 +688,36 @@ def test_classify_drizzle_shaft_under_broken_cloud_stays_whole():
     assert (cls.target[6:, 28] == Target.AEROSOL).all()
 
 
+def test_classify_deep_warm_column_without_source_is_drizzle():
+    # Heavy rain extinguishes the beam below the melting level: no liquid or ice
+    # is ever detected above, yet the column itself is evidence -- aerosol never
+    # sustains cloud-strength backscatter over >2 km of depth (the Juelich
+    # case). Such a column is rain even with nothing detected above it.
+    n_time, n_height = 4, 200
+    beta = ma.masked_all((n_time, n_height))
+    beta[:, 5:80] = 5e-6  # 2.2 km contiguous bright warm column, nothing above
+    model = _model(np.full((n_time, n_height), 290.0))
+    cls = classify(_synthetic_ceilo(beta), model, strong_beta=3e-6)
+    assert (cls.target[:, 40] == Target.DRIZZLE_OR_RAIN).all()
+
+
+def test_classify_mid_depth_column_joins_shaft_but_not_alone():
+    # A 1.5 km bright warm column is not deep enough to prove rain by itself,
+    # but beside a self-evident deep rain column it joins the shaft; the same
+    # column isolated in clear air stays aerosol.
+    n_time, n_height = 9, 200
+    beta = ma.masked_all((n_time, n_height))
+    beta[:3, 5:80] = 5e-6  # deep (2.2 km) rain columns
+    beta[3:5, 5:55] = 5e-6  # 1.5 km columns touching them in time
+    # profile 5 stays fully clear, isolating the rest
+    beta[6:, 5:55] = 5e-6  # identical 1.5 km columns, no rain anywhere near
+    model = _model(np.full((n_time, n_height), 290.0))
+    cls = classify(_synthetic_ceilo(beta), model, strong_beta=3e-6)
+    assert (cls.target[:3, 40] == Target.DRIZZLE_OR_RAIN).all()  # deep = rain
+    assert (cls.target[3:5, 30] == Target.DRIZZLE_OR_RAIN).all()  # joined
+    assert (cls.target[6:, 30] == Target.AEROSOL).all()  # isolated = aerosol
+
+
 def test_classify_drizzle_bridges_thin_melt_gap():
     # A drizzle column capped by depol ice, with a thin masked notch (the screened
     # melting-layer backscatter minimum) between them: the notch must not sever the

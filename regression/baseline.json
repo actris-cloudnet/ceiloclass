@@ -48,15 +48,31 @@
     "strong_beta": 4.18e-6,
     "t0_median": 3453.8
   },
+  "juelich-attenuated-rain": {
+    "checks": {
+      "attenuated deep rain columns are drizzle/rain": 0.71373,
+      "daytime boundary-layer aerosol survives": 0.95467
+    },
+    "fractions": {
+      "AEROSOL": 0.05154,
+      "CLEAR": 0.90595,
+      "DRIZZLE_OR_RAIN": 0.03454,
+      "DROPLET": 0.00316,
+      "ICE": 0.00265,
+      "SUPERCOOLED": 0.00216
+    },
+    "strong_beta": 9.95e-7,
+    "t0_median": 3494.2
+  },
   "kenttarova-broken-cumulus": {
     "checks": {
-      "morning drizzle shafts are kept whole": 0.73631,
+      "morning drizzle shafts are kept whole": 0.74311,
       "the cloud-free morning boundary layer stays aerosol": 0.54935
     },
     "fractions": {
-      "AEROSOL": 0.03682,
+      "AEROSOL": 0.03592,
       "CLEAR": 0.89545,
-      "DRIZZLE_OR_RAIN": 0.04124,
+      "DRIZZLE_OR_RAIN": 0.04214,
       "DROPLET": 0.02419,
       "ICE": 9e-5,
       "SUPERCOOLED": 0.00221
@@ -66,12 +82,12 @@
   },
   "kenttarova-drizzle": {
     "checks": {
-      "real sub-cloud drizzle is retained": 0.01374
+      "real sub-cloud drizzle is retained": 0.0138
     },
     "fractions": {
-      "AEROSOL": 0.04134,
+      "AEROSOL": 0.04128,
       "CLEAR": 0.90618,
-      "DRIZZLE_OR_RAIN": 0.01374,
+      "DRIZZLE_OR_RAIN": 0.0138,
       "DROPLET": 0.01008,
       "ICE": 0.02054,
       "SUPERCOOLED": 0.00812
@@ -113,14 +129,14 @@
   },
   "lindenberg-da10-dial": {
     "checks": {
-      "evening sub-cloud precipitation is drizzle/rain": 0.17904,
+      "evening sub-cloud precipitation is drizzle/rain": 0.18188,
       "high cirrus aloft is ice": 0.09196,
-      "the boundary layer is classified (as aerosol)": 0.9524
+      "the boundary layer is classified (as aerosol)": 0.95196
     },
     "fractions": {
-      "AEROSOL": 0.13475,
+      "AEROSOL": 0.13464,
       "CLEAR": 0.82671,
-      "DRIZZLE_OR_RAIN": 0.00668,
+      "DRIZZLE_OR_RAIN": 0.00679,
       "DROPLET": 0.00279,
       "ICE": 0.02644,
       "SUPERCOOLED": 0.00263

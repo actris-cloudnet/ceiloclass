@@ -246,6 +246,32 @@ CASES: list[Case] = [
         ],
     ),
     Case(
+        id="juelich-attenuated-rain",
+        site="juelich",
+        date="2026-08-03",
+        instrument="chm15k",
+        note="Heavy evening rain extinguishes the beam below the melting level: "
+        "no liquid or ice is detectable above the columns, so only their depth "
+        "marks them as rain (DEEP_RAIN_THICKNESS). The daytime boundary-layer "
+        "aerosol must survive untouched.",
+        checks=[
+            Check(
+                "attenuated deep rain columns are drizzle/rain",
+                Target.DRIZZLE_OR_RAIN,
+                min_frac=0.55,
+                hours=(17.0, 22.0),
+                height_m=(100, 3000),
+            ),
+            Check(
+                "daytime boundary-layer aerosol survives",
+                Target.AEROSOL,
+                min_frac=0.30,
+                hours=(9.0, 15.0),
+                height_m=(0, 700),
+            ),
+        ],
+    ),
+    Case(
         id="troll-polar-ice",
         site="troll",
         date="2026-05-09",
