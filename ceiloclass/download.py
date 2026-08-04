@@ -90,6 +90,7 @@ def list_raw_sources(
     ids = _portal_ids(instrument) if instrument else _ALL_PORTAL_IDS
     with _portal_errors():
         metadata = APIClient().raw_files(site_id=site_id, date=date, instrument_id=ids)
+    metadata = [m for m in metadata if m.status not in ("created", "invalid")]
     sources = _group_sources(metadata, raw=True)
     if not sources:
         what = instrument or "ceilometer/lidar"
