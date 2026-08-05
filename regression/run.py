@@ -272,6 +272,34 @@ CASES: list[Case] = [
         ],
     ),
     Case(
+        id="payerne-melting-level",
+        site="payerne",
+        date="2026-08-04",
+        instrument="cl61",
+        note="Evening stratiform rain with a razor-sharp depol melt line ~600 m "
+        "below the model 0 degC level. The cold extension must ride through a "
+        "thin low-depol band under the cold base and cross the attenuation void "
+        "where the beam dies before the freezing region, so the ice/rain "
+        "boundary follows the observed melt, not the model t0.",
+        checks=[
+            Check(
+                "ice between observed melt and model t0 is ice, not drizzle",
+                Target.ICE,
+                min_frac=0.60,
+                hours=(18.0, 24.0),
+                height_m=(3650, 4000),
+                of="classified",
+            ),
+            Check(
+                "rain below the observed melt stays drizzle/rain",
+                Target.DRIZZLE_OR_RAIN,
+                min_frac=0.55,
+                hours=(18.0, 24.0),
+                height_m=(2500, 3400),
+            ),
+        ],
+    ),
+    Case(
         id="troll-polar-ice",
         site="troll",
         date="2026-05-09",

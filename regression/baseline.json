@@ -82,14 +82,14 @@
   },
   "kenttarova-drizzle": {
     "checks": {
-      "real sub-cloud drizzle is retained": 0.0138
+      "real sub-cloud drizzle is retained": 0.01365
     },
     "fractions": {
-      "AEROSOL": 0.04128,
+      "AEROSOL": 0.04127,
       "CLEAR": 0.90618,
-      "DRIZZLE_OR_RAIN": 0.0138,
+      "DRIZZLE_OR_RAIN": 0.01365,
       "DROPLET": 0.01008,
-      "ICE": 0.02054,
+      "ICE": 0.02069,
       "SUPERCOOLED": 0.00812
     },
     "strong_beta": 1.06e-6,
@@ -168,7 +168,7 @@
     "fractions": {
       "AEROSOL": 0.09806,
       "CLEAR": 0.86623,
-      "DRIZZLE_OR_RAIN": 0.01278,
+      "DRIZZLE_OR_RAIN": 0.01277,
       "DROPLET": 0.008,
       "ICE": 0.0082,
       "SUPERCOOLED": 0.00674
@@ -239,6 +239,22 @@
     },
     "strong_beta": 1e-5,
     "t0_median": 1056.2
+  },
+  "payerne-melting-level": {
+    "checks": {
+      "ice between observed melt and model t0 is ice, not drizzle": 0.67215,
+      "rain below the observed melt stays drizzle/rain": 0.88725
+    },
+    "fractions": {
+      "AEROSOL": 0.10042,
+      "CLEAR": 0.82695,
+      "DRIZZLE_OR_RAIN": 0.05495,
+      "DROPLET": 0.00332,
+      "ICE": 0.01297,
+      "SUPERCOOLED": 0.0014
+    },
+    "strong_beta": 1.65e-6,
+    "t0_median": 4086.7
   },
   "troll-polar-ice": {
     "checks": {

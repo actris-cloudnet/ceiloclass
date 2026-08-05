@@ -160,6 +160,45 @@ def test_extend_cold_to_ice_drops_isolated_pillar():
     assert extended[10, 7:].all()
 
 
+def test_extend_cold_to_ice_bridges_thin_low_depol_dip():
+    # A thin non-ice band (embedded supercooled layer / near-t0 crystals below
+    # the core depol limit) right under the cold base must not sever the flood
+    # (the Payerne case); a thick one (the rain shaft) still blocks.
+    n_time, n_gate = 20, 30
+    height = np.arange(n_gate) * 100.0
+    cold = np.zeros((n_time, n_gate), dtype=bool)
+    cold[:, 25:] = True
+    ice = np.zeros((n_time, n_gate), dtype=bool)
+    ice[:, 24] = True  # touches the cold base
+    ice[:, 15:23] = True  # solid core below, after a 100 m (1-gate) dip at 23
+    extended = _extend_cold_to_ice(cold, ice, height, bridge=150.0)
+    assert extended[:, 15:].all()  # dip bridged, cold reaches the deep ice base
+    assert not extended[:, 14].any()  # thick low-depol below still blocks
+
+
+def test_extend_cold_to_ice_crosses_attenuation_void_only_when_abrupt():
+    # Heavy rain extinguishes the beam below the freezing region: the observed
+    # ice hangs in masked air below the model cold region. The void is crossed
+    # when the signal top is still cloud-bright (extinction), but a layer that
+    # faded out gradually (aerosol, e.g. lofted dust) is not annexed.
+    n_time, n_gate = 20, 30
+    height = np.arange(n_gate) * 100.0
+    cold = np.zeros((n_time, n_gate), dtype=bool)
+    cold[:, 25:] = True
+    ice = np.zeros((n_time, n_gate), dtype=bool)
+    ice[:, 10:20] = True  # observed ice cloud, top at gate 19, void 20:25
+    signal = np.zeros((n_time, n_gate), dtype=bool)
+    signal[:, 5:20] = True  # signal dies at gate 19
+    bright = np.zeros((n_time, n_gate), dtype=bool)
+    bright[:, 8:20] = True  # beam died while still cloud-bright
+    extended = _extend_cold_to_ice(cold, ice, height, signal, bright)
+    assert extended[:, 10:].all()  # void crossed, cold anchored to the ice
+    faded = bright.copy()
+    faded[:, 17:] = False  # top gates dim: layer faded out, not extinguished
+    unmoved = _extend_cold_to_ice(cold, ice, height, signal, faded)
+    assert np.array_equal(unmoved, cold)  # clear air stays a barrier
+
+
 def test_extend_cold_to_ice_ignores_disconnected_ice():
     n_time, n_gate = 10, 12
     height = np.arange(n_gate) * 100.0

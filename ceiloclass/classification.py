@@ -57,6 +57,13 @@ so that notch does not sever a drizzle column from its cloud and drop it to
 aerosol. Stays well below the kilometre-scale clear air that must still reject an
 unconnected near-surface layer (e.g. Mindelo haze under a distant cirrus)."""
 
+MAX_PHYSICAL_BETA = 1e-2
+"""Attenuated backscatter above this is instrument junk, not signal (sr-1 m-1).
+
+Even a dense fog or a hard cloud base tops out around 1e-3; harmonized files
+occasionally carry unmasked fill/garbage values (up to ~1e18 at Payerne) that
+would otherwise enter the histogram and the classification as 'bright'."""
+
 DEEP_RAIN_THICKNESS = 2000.0
 """A contiguous cloud-strength warm column at least this deep is rain (m).
 
@@ -191,7 +198,7 @@ def classify(
             model, ceilo.time, ceilo.range, altitude=altitude, use_wet_bulb=use_wet_bulb
         )
 
-    beta = ma.asarray(ceilo.beta)
+    beta = ma.masked_greater(ma.asarray(ceilo.beta), MAX_PHYSICAL_BETA)
     depol = None if ceilo.depol is None else ma.asarray(ceilo.depol)
     tw = model.tw
     height = np.asarray(ceilo.range, dtype=float)
@@ -379,7 +386,7 @@ def _depol_adjustments(
     ice_like = ice_like & ~ms_protected
     droplet = droplet & ~ice_like
     ice_core = ice_like & (ma.filled(depol, 0.0) > ICE_CORE_DEPOL_LIMIT)
-    cold = _extend_cold_to_ice(freezing, ice_core & bright, height)
+    cold = _extend_cold_to_ice(freezing, ice_core & bright, height, ~beta_mask, bright)
     return droplet, ice_like, cold
 
 
@@ -387,27 +394,66 @@ def _extend_cold_to_ice(
     cold: npt.NDArray[np.bool_],
     ice_like: npt.NDArray[np.bool_],
     height: npt.NDArray[np.floating],
+    signal: npt.NDArray[np.bool_] | None = None,
+    bright: npt.NDArray[np.bool_] | None = None,
     *,
     max_depth: float = 1500.0,
     smooth_window: int = 10,
+    bridge: float = 150.0,
 ) -> npt.NDArray[np.bool_]:
     """Extend the freezing region downward through ice connected to it.
 
     A biased-high model 0 degC level leaves depol-confirmed ice on its warm side
     (falling ice not yet melted). Starting from the model freezing region, flood
-    downward through contiguous `ice_like` gates -- but no more than `max_depth`
-    below the original boundary, so a deep depolarizing layer (e.g. lofted dust
-    touching cloud) cannot drag the whole column sub-freezing.
+    downward through `ice_like` gates -- but no more than `max_depth` below the
+    original boundary, so a deep depolarizing layer (e.g. lofted dust touching
+    cloud) cannot drag the whole column sub-freezing.
 
-    The resulting ice base is then smoothed against single-profile pillars (a
-    noisy depolarizing column flooding to the ground): the base height is replaced
-    by its rolling median over +/-`smooth_window` profiles and the extension is
-    clipped to it. This keys on the base being an outlier, not on a profile count,
-    so it is insensitive to the time averaging and to clustered pillars (the
-    median tolerates a minority of them).
+    Strict gate-by-gate contiguity is too fragile for two real interruptions
+    (the Payerne melting-level case):
+
+    - a thin low-depol band inside the ice -- an embedded supercooled layer, or
+      near-t0 crystals below the ice-core limit -- severs the chain right below
+      the cold base. Non-ice runs no thicker than `bridge` metres are therefore
+      passable; the rain shaft below the true melt is a kilometre-scale
+      low-depol run and still blocks.
+    - heavy precipitation extinguishes the beam before the freezing region, so
+      the whole observed ice cloud hangs in clear (masked) air below the model
+      cold region. With `signal` and `bright` given, the masked void above each
+      profile's signal top is passable -- but only when the beam died abruptly
+      in cloud-bright signal (extinction inside cloud/precip). An aerosol layer
+      instead fades gradually below the threshold before masking, so its top is
+      not bright and clear air above it remains a barrier.
+
+    The extension is claimed only down to the lowest `ice_like` gate actually
+    reached (a bridged gap never dangles below the ice), and the resulting base
+    is smoothed against single-profile pillars (a noisy depolarizing column
+    flooding to the ground): the base height is replaced by its rolling median
+    over +/-`smooth_window` profiles and the extension is clipped to it. This
+    keys on the base being an outlier, not on a profile count, so it is
+    insensitive to the time averaging and to clustered pillars (the median
+    tolerates a minority of them).
     """
     max_steps = max(_n_elements(height, max_depth), 1)
-    extended = _grow_range(cold, ice_like, max_steps, up=False)
+    passable = ice_like | _thin_runs(~ice_like, height, bridge)
+    if signal is not None and bright is not None:
+        n_time, n_gate = signal.shape
+        has = signal.any(axis=1)
+        top = np.where(has, n_gate - 1 - np.argmax(signal[:, ::-1], axis=1), 0)
+        # Abrupt extinction: still cloud-bright at (or one gate below) the top.
+        abrupt = has & (
+            bright[np.arange(n_time), top]
+            | bright[np.arange(n_time), np.maximum(top - 1, 0)]
+        )
+        void = ~signal & (np.arange(n_gate)[np.newaxis, :] > top[:, np.newaxis])
+        passable |= void & abrupt[:, np.newaxis]
+    extended = _grow_range(cold, passable, max_steps, up=False)
+    # Claim only down to the lowest ice gate reached: a bridged or void gap must
+    # lead to ice, never end the extension inside itself.
+    reached = extended & ice_like
+    floor = np.where(reached.any(axis=1), np.argmax(reached, axis=1), extended.shape[1])
+    keep = np.arange(extended.shape[1])[np.newaxis, :] >= floor[:, np.newaxis]
+    extended = cold | (extended & keep)
     if not (extended & ~cold).any():
         return extended
     return _clip_to_median_base(cold, extended, smooth_window)

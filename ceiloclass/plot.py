@@ -12,7 +12,7 @@ import numpy.typing as npt
 from matplotlib.colors import BoundaryNorm, ListedColormap, LogNorm
 from numpy import ma
 
-from .classification import Classification, Target
+from .classification import MAX_PHYSICAL_BETA, Classification, Target
 
 # Colors follow the CloudnetPy target-classification convention so these plots
 # read the same way as standard Cloudnet figures.
@@ -87,7 +87,9 @@ def plot_classification(
     if beta is not None:
         ax = axes[panel]
         panel += 1
-        masked = ma.masked_less_equal(ma.array(beta), 0)
+        # Junk screen mirrors classify: unmasked fill values would otherwise
+        # paint over-range streaks and stretch the histogram by many decades.
+        masked = ma.masked_less_equal(ma.masked_greater(beta, MAX_PHYSICAL_BETA), 0)
         _plot_curtain(
             fig,
             ax,
@@ -107,9 +109,10 @@ def plot_classification(
         masked = ma.masked_invalid(ma.array(depol))
         if beta is not None:
             # Hide clear-air depol noise: only show where backscatter survived.
-            masked = ma.masked_where(
-                ma.getmaskarray(ma.masked_less_equal(beta, 0)), masked
+            bad = ma.getmaskarray(
+                ma.masked_less_equal(ma.masked_greater(beta, MAX_PHYSICAL_BETA), 0)
             )
+            masked = ma.masked_where(bad, masked)
         _plot_curtain(
             fig,
             ax,
@@ -200,7 +203,7 @@ def _plot_beta_hist(
     The cloud/precipitation vs aerosol threshold is drawn as a vertical line.
     """
     values = ma.filled(ma.asarray(beta), np.nan).ravel()
-    values = values[np.isfinite(values) & (values > 0)]
+    values = values[np.isfinite(values) & (values > 0) & (values <= MAX_PHYSICAL_BETA)]
     ax.set_title("Screened backscatter histogram")
     ax.set_xlabel("beta (sr⁻¹ m⁻¹)")
     ax.set_ylabel("Count")
