@@ -23,7 +23,7 @@ _LABELS: dict[Target, tuple[str, str]] = {
     Target.ICE: ("Ice", "#a0b0bb"),
     Target.SUPERCOOLED: ("Supercooled liquid", "#464ab9"),
     Target.AEROSOL: ("Aerosol", "#cebc89"),
-    Target.ATTENUATED: ("Beam attenuated", "#dcdcdc"),
+    Target.ATTENUATED: ("Beam attenuated", "#ededed"),
 }
 
 
