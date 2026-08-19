@@ -9,9 +9,11 @@ from ceiloclass.classification import (
     Target,
     _adaptive_strong_beta,
     _assemble,
+    _beam_saturation,
     _despeckle,
     _extend_cold_to_ice,
     _extend_ice_to_cloud_base,
+    _find_attenuated,
     _flood_connected,
     _melt_band_below_ice,
     _source_connected,
@@ -383,12 +385,129 @@ def test_melt_band_below_ice_respects_max_depth():
     assert not capped.any()  # tight cap: floods cannot span the column
 
 
+# --- _find_attenuated --------------------------------------------------------
+
+
+_H = np.arange(30) * 100.0  # 100 m gates for the _column tests
+
+
+def _column(*runs, n_gate=30):
+    """A target column from (start, stop, Target) runs; the rest is clear."""
+    target = np.full((1, n_gate), Target.CLEAR, dtype=int)
+    for start, stop, kind in runs:
+        target[0, start:stop] = kind
+    return target
+
+
+def test_find_attenuated_liquid_in_top_run_marks_void_above():
+    target = _column((5, 10, Target.AEROSOL), (10, 14, Target.DROPLET))
+    bright = np.zeros_like(target, dtype=bool)
+    att = _find_attenuated(target, bright, _H)
+    assert att[0, 14:].all() and not att[0, :14].any()
+
+
+def test_find_attenuated_liquid_far_below_top_is_not_used():
+    # A surface-pass liquid speck under 2 km of aerosol: the beam evidently went
+    # on through it, so neither rule 1 nor the saturation population use it.
+    target = _column((0, 2, Target.DROPLET), (2, 24, Target.AEROSOL))
+    bright = np.zeros_like(target, dtype=bool)
+    assert not _find_attenuated(target, bright, _H).any()
+    near = _column(
+        (0, 2, Target.AEROSOL), (18, 21, Target.DROPLET), (21, 24, Target.AEROSOL)
+    )
+    assert _find_attenuated(near, bright, _H)[0, 24:].all()  # liquid 300 m below top
+
+
+def test_find_attenuated_liquid_seen_through_is_not_used():
+    # Signal above the liquid layer (a separate higher run) proves the beam got
+    # through: only the topmost run decides, and faint cirrus there fades.
+    target = _column((10, 14, Target.DROPLET), (20, 23, Target.ICE))
+    bright = np.zeros_like(target, dtype=bool)
+    assert not _find_attenuated(target, bright, _H).any()
+
+
+def test_find_attenuated_rain_without_cloud_above():
+    # Precipitation needs a cloud above; not seeing one means the beam died in it.
+    target = _column((2, 12, Target.DRIZZLE_OR_RAIN), (12, 15, Target.AEROSOL))
+    bright = np.zeros_like(target, dtype=bool)
+    att = _find_attenuated(target, bright, _H)
+    assert att[0, 15:].all() and not att[0, :15].any()
+    # With ice above the rain (melting level seen), the rain rule no longer holds.
+    topped = _column((2, 12, Target.DRIZZLE_OR_RAIN), (12, 18, Target.ICE))
+    assert not _find_attenuated(topped, bright, _H).any()
+
+
+def test_find_attenuated_abrupt_bright_top():
+    target = _column((5, 20, Target.ICE))
+    bright = np.zeros_like(target, dtype=bool)
+    bright[0, 8:20] = True  # still cloud-bright at the top gate
+    assert _find_attenuated(target, bright, _H)[0, 20:].all()
+    faded = bright.copy()
+    faded[0, 17:] = False  # top gates dim: the layer faded, not extinguished
+    assert not _find_attenuated(target, faded, _H).any()
+
+
+def test_find_attenuated_bright_aerosol_top_stays_clear():
+    # Bright but unsourced aerosol (marine haze) at the top is not extinction.
+    target = _column((2, 12, Target.AEROSOL))
+    bright = np.zeros_like(target, dtype=bool)
+    bright[0, 2:12] = True
+    assert not _find_attenuated(target, bright, _H).any()
+
+
+def test_find_attenuated_saturated_integral_marks_void():
+    # A column with no detected liquid, no rain and a faded top, but whose
+    # backscatter integral has reached the saturation plateau: the beam is gone.
+    target = _column(
+        (2, 12, Target.AEROSOL), (12, 20, Target.ICE), (20, 22, Target.AEROSOL)
+    )
+    bright = np.zeros_like(target, dtype=bool)
+    integral = np.zeros(target.shape)
+    integral[0, 20:] = 0.025  # integral at the top gate (21)
+    assert not _find_attenuated(target, bright, _H).any()  # rules 1-3 alone: clear
+    att = _find_attenuated(target, bright, _H, integral=integral, saturation=0.03)
+    assert att[0, 22:].all() and not att[0, :22].any()
+    weak = integral * 0.5  # half of that: 42% of the beam lost, not extinguished
+    assert not _find_attenuated(
+        target, bright, _H, integral=weak, saturation=0.03
+    ).any()
+    # Disabled (no saturation) -> integral ignored.
+    assert not _find_attenuated(
+        target, bright, _H, integral=integral, saturation=None
+    ).any()
+
+
+def test_beam_saturation_is_median_of_liquid_tops():
+    rng = np.random.default_rng(0)
+    n = 300
+    target = np.full((n, 30), Target.CLEAR, dtype=int)
+    target[:, 5:12] = Target.AEROSOL
+    target[:200, 12:16] = Target.DROPLET  # 200 liquid-topped profiles, top at 15
+    integral = np.zeros((n, 30))
+    integral[:, 12:] = 0.02
+    integral[:200, 15:] = rng.normal(0.03, 0.002, (200, 1))  # plateau at ~0.03
+    integral[200:, 11] = 0.5  # non-liquid tops carry wild values: ignored
+    sat = _beam_saturation(target, integral, _H)
+    assert sat is not None and abs(sat - 0.03) < 0.002
+    # Too few liquid-topped profiles -> no estimate.
+    assert _beam_saturation(target[:150], integral[:150], _H) is None
+
+
+def test_find_attenuated_empty_and_full_profiles():
+    empty = _column()
+    full = _column((0, 30, Target.DROPLET))
+    bright = np.zeros_like(empty, dtype=bool)
+    assert not _find_attenuated(empty, bright, _H).any()
+    assert not _find_attenuated(full, bright, _H).any()
+
+
 # --- classify integration ---------------------------------------------------
 
 
 def _synthetic_ceilo(beta_masked, depol=None):
+    start = datetime.datetime(2025, 6, 14)
     time = np.array(
-        [datetime.datetime(2025, 6, 14, 0, i) for i in range(beta_masked.shape[0])]
+        [start + datetime.timedelta(minutes=i) for i in range(beta_masked.shape[0])]
     )
     rng = np.arange(beta_masked.shape[1]) * 30.0
     raw = CeiloRaw(time, rng, beta_masked, 910.0, depol=depol)
@@ -416,6 +535,37 @@ def test_classify_detects_warm_droplet():
     assert cls.droplet[:, 40].all()
     assert (cls.target == Target.DROPLET).any()
     assert not cls.cold.any()  # warm column -> no ice
+
+
+def test_classify_marks_void_above_liquid_as_attenuated():
+    beta = _liquid_layer_beta()  # liquid layer at gates 37..43, nothing above
+    model = _model(np.full(beta.shape, 290.0))
+    cls = classify(_synthetic_ceilo(beta), model)
+    assert (cls.target[:, 44:] == Target.ATTENUATED).all()
+    assert cls.attenuated[:, 44:].all()
+    assert (cls.target[:, :37] == Target.CLEAR).all()  # below the cloud: clear
+    # An aerosol-only column leaves the void above it clear.
+    haze = ma.masked_all(beta.shape)
+    haze[:, 5:30] = 8e-7
+    clear = classify(_synthetic_ceilo(haze), model, strong_beta=3e-6)
+    assert not (clear.target == Target.ATTENUATED).any()
+
+
+def test_classify_beam_saturation_modes():
+    beta = _liquid_layer_beta(n_time=4)  # too few profiles to self-calibrate
+    model = _model(np.full(beta.shape, 290.0))
+    auto = classify(_synthetic_ceilo(beta), model)
+    assert auto.beam_saturation is None
+    fixed = classify(_synthetic_ceilo(beta), model, beam_saturation=0.03)
+    assert fixed.beam_saturation == 0.03
+    off = classify(_synthetic_ceilo(beta), model, beam_saturation=None)
+    assert off.beam_saturation is None
+    # Enough liquid-topped profiles: the plateau is estimated from them.
+    many = _liquid_layer_beta(n_time=250)
+    est = classify(_synthetic_ceilo(many), _model(np.full(many.shape, 290.0)))
+    expected = float((ma.filled(many[0], 0.0) * 30.0).sum())  # one profile's integral
+    assert est.beam_saturation is not None
+    assert abs(est.beam_saturation - expected) / expected < 0.02
 
 
 def test_classify_low_depol_cold_layer_is_supercooled():

@@ -43,12 +43,14 @@ _TARGET_DEFINITION = "\n".join(
         "Value 3: Ice particles.",
         "Value 4: Supercooled liquid droplets.",
         "Value 5: Aerosol particles.",
+        "Value 6: Beam attenuated below (undetected).",
     )
 )
 
 # Single-word CF flag_meanings, in Target value order.
 _FLAG_MEANINGS = (
-    "clear_sky cloud_droplets drizzle_or_rain ice supercooled_droplets aerosol"
+    "clear_sky cloud_droplets drizzle_or_rain ice supercooled_droplets aerosol "
+    "attenuated"
 )
 
 
@@ -185,6 +187,18 @@ def write_classification(
             "Backscatter threshold separating cloud/precipitation from aerosol"
         )
         threshold[...] = np.float32(classification.strong_beta)
+
+        if classification.beam_saturation is not None:
+            sat = nc.createVariable("beam_saturation", "f4")
+            sat.units = "sr-1"
+            sat.long_name = "Integrated attenuated backscatter of an extinguished beam"
+            sat.comment = (
+                "Saturation plateau of the column integral of attenuated "
+                "backscatter, estimated from this file's liquid-topped profiles; "
+                "the attenuation rule marks the void above a profile whose "
+                "integral reaches a fraction of it."
+            )
+            sat[...] = np.float32(classification.beam_saturation)
 
         if wavelength is not None:
             wl = nc.createVariable("wavelength", "f4")

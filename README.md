@@ -96,7 +96,12 @@ classification, restricted to the parts that work without radar:
   it. The backscatter threshold separating this from weaker signal is picked per
   file from the backscatter histogram, so it adapts to each site/day's aerosol
   load.
-- Remaining signal is **aerosol**; gates with no signal are **clear**.
+- Remaining signal is **aerosol**; gates with no signal are **clear** — except
+  above a profile whose beam was extinguished (a liquid cloud, precipitation
+  with no visible cloud above it, an abruptly ending cloud-bright top, or a
+  column whose integrated backscatter has reached the saturation plateau
+  estimated from that file's liquid clouds), where the signal-free void is
+  **beam attenuated**: the lidar could not see there.
 - With a CL61, the depolarization ratio splits ice from liquid (non-spherical ice
   depolarizes strongly) and anchors the freezing level to the observed ice.
 

@@ -12,6 +12,7 @@ the observed melt.
 from dataclasses import dataclass
 from enum import IntEnum
 from os import PathLike
+from typing import Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -86,6 +87,37 @@ on its own (it stays aerosol in isolation) but is admitted into a shaft when
 sourced one. Sits above the thickest genuine aerosol runs observed (~0.85 km)
 so a haze or dust layer touching a drizzle shaft still cannot ride the flood."""
 
+SATURATION_FRACTION = 0.67
+"""Fraction of the saturated backscatter integral at which the beam counts as gone.
+
+The column integral of attenuated backscatter, I(z) = int beta' dz, is bounded:
+I = (1 - T^2) / (2 eta S), so it saturates at I_sat = 1 / (2 eta S) once the
+two-way transmission T^2 has vanished -- about 0.03 sr-1 for liquid with a
+ceilometer (S ~ 18.8 sr, multiple-scattering factor eta ~ 0.7-1). I / I_sat is
+therefore the fraction of the beam lost by that height. At 0.67 two thirds of
+the beam are gone, so only a bright target could still be seen above; the
+void above counts as attenuated. Factory-calibrated Vaisala ceilometers reach
+I_sat consistently (0.02-0.035 across sites), which is why the plateau can be
+estimated per file from the fully attenuating liquid tops (`_beam_saturation`)
+instead of relying on the absolute calibration."""
+
+LIQUID_EXTINCTION_GAP = 500.0
+"""How far above its highest liquid gate a profile's signal may still run (m).
+
+An extinguishing liquid layer kills the signal within a few hundred metres of
+its top (the beam decays through the cloud and is lost below the noise floor);
+`grow_liquid` has already absorbed the halo. Signal running on much further --
+kilometres of aerosol above a surface-pass liquid speck in a dust column -- shows
+the beam went on, and such a profile is neither attenuated by that liquid nor a
+sample of the saturation plateau."""
+
+MIN_SATURATION_PROFILES = 200
+"""Liquid-topped profiles needed to estimate the saturation integral per file.
+
+With fewer, the median of the liquid-top integrals could be a handful of thin
+broken cumuli rather than the saturation plateau, and an underestimated plateau
+would over-mark attenuation; the integral rule is then skipped."""
+
 
 class Target(IntEnum):
     """Target classification categories."""
@@ -96,6 +128,7 @@ class Target(IntEnum):
     ICE = 3
     SUPERCOOLED = 4
     AEROSOL = 5
+    ATTENUATED = 6
 
 
 @dataclass
@@ -109,10 +142,15 @@ class Classification:
         droplet: Liquid droplet layers.
         cold: Sub-freezing region (above the 0 degC level).
         aerosol: Aerosol (all other signal).
+        attenuated: Beam extinguished below: the signal-free void above a profile's
+            top where the lidar could not see (see `_find_attenuated`).
         quality: True where model temperature was extrapolated (lower quality).
         tw: Model wet-bulb temperature on the (time, range) grid (K).
         t0_alt: Altitude of the 0 degC isotherm per profile (m), time.
         strong_beta: Backscatter threshold used to split cloud/precip from aerosol.
+        beam_saturation: Integrated attenuated backscatter at which the beam is
+            extinguished (sr-1), as used by the attenuation rule; None when the
+            integral rule was not applied (no estimate available or disabled).
     """
 
     time: npt.NDArray[np.object_]
@@ -123,10 +161,12 @@ class Classification:
     ice: npt.NDArray[np.bool_]
     rain: npt.NDArray[np.bool_]
     aerosol: npt.NDArray[np.bool_]
+    attenuated: npt.NDArray[np.bool_]
     quality: npt.NDArray[np.bool_]
     tw: npt.NDArray[np.floating]
     t0_alt: npt.NDArray[np.floating]
     strong_beta: float
+    beam_saturation: float | None = None
 
 
 def classify(
@@ -141,13 +181,17 @@ def classify(
     ms_tail: float = MS_TAIL,
     drizzle_source_window: int = 0,
     find_surface_liquid: bool = True,
+    beam_saturation: float | Literal["auto"] | None = "auto",
 ) -> Classification:
     """Classify ceilometer targets: liquid layers + 0 degC line, rest aerosol.
 
     Strong backscatter (`beta > strong_beta`) that is not a liquid layer is
     precipitation/cloud: drizzle/rain where the air is above 0 degC, ice where it
     is below. Weaker signal is aerosol. A speckle filter then clears isolated
-    pixels left by screening noise.
+    pixels left by screening noise, and the signal-free void above a profile
+    whose beam was extinguished (liquid cloud, precipitation without a visible
+    source, an abrupt cloud-bright top, or a saturated backscatter integral) is
+    marked `ATTENUATED` rather than clear.
 
     Args:
         ceilo: A `Ceilo` with screened `beta` (any instrument except LD40).
@@ -186,6 +230,13 @@ def classify(
             (the surface pass of `find_liquid`). Disable it when the instrument's
             near-surface overlap correction is unreliable and would otherwise flag
             a spurious surface liquid layer.
+        beam_saturation: Integrated attenuated backscatter (sr-1) at which the
+            beam is extinguished, for the integral attenuation rule (see
+            `SATURATION_FRACTION`). `"auto"` (default) estimates it per file from
+            the profiles topped by a liquid layer (`_beam_saturation`), which
+            makes the rule independent of the absolute calibration; a float
+            fixes it (e.g. 0.03 for a calibrated ceilometer); `None` disables
+            the integral rule, leaving the other attenuation rules in place.
 
     Returns:
         A `Classification` on the ceilometer time/range grid.
@@ -313,6 +364,13 @@ def classify(
 
     target = _assemble(droplet, cold, ice, rain, aerosol)
     target = _despeckle(target, speckle_min)
+    integral = _beta_integral(beta, height)
+    if beam_saturation == "auto":
+        beam_saturation = _beam_saturation(target, integral, height)
+    attenuated = _find_attenuated(
+        target, bright, height, integral=integral, saturation=beam_saturation
+    )
+    target = np.where(attenuated, Target.ATTENUATED, target)
 
     return Classification(
         time=ceilo.time,
@@ -323,10 +381,12 @@ def classify(
         ice=ice,
         rain=rain,
         aerosol=aerosol,
+        attenuated=attenuated,
         quality=model.extrapolated,
         tw=tw,
         t0_alt=_find_t0_alt(tw, height),
         strong_beta=strong_beta,
+        beam_saturation=beam_saturation,
     )
 
 
@@ -437,15 +497,12 @@ def _extend_cold_to_ice(
     max_steps = max(_n_elements(height, max_depth), 1)
     passable = ice_like | _thin_runs(~ice_like, height, bridge)
     if signal is not None and bright is not None:
-        n_time, n_gate = signal.shape
-        has = signal.any(axis=1)
-        top = np.where(has, n_gate - 1 - np.argmax(signal[:, ::-1], axis=1), 0)
+        has, top = _signal_top(signal)
         # Abrupt extinction: still cloud-bright at (or one gate below) the top.
-        abrupt = has & (
-            bright[np.arange(n_time), top]
-            | bright[np.arange(n_time), np.maximum(top - 1, 0)]
+        abrupt = has & _at_top(bright, top)
+        void = ~signal & (
+            np.arange(signal.shape[1])[np.newaxis, :] > top[:, np.newaxis]
         )
-        void = ~signal & (np.arange(n_gate)[np.newaxis, :] > top[:, np.newaxis])
         passable |= void & abrupt[:, np.newaxis]
     extended = _grow_range(cold, passable, max_steps, up=False)
     # Claim only down to the lowest ice gate reached: a bridged or void gap must
@@ -780,6 +837,159 @@ def _adaptive_strong_beta(
                 threshold = centers[i]
                 break
     return float(min(threshold, centers[peak] * max_peak_ratio, max_strong_beta))
+
+
+def _signal_top(
+    signal: npt.NDArray[np.bool_],
+) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.intp]]:
+    """Per profile: whether any signal exists, and the index of its highest gate."""
+    n_gate = signal.shape[1]
+    has = signal.any(axis=1)
+    top = np.where(has, n_gate - 1 - np.argmax(signal[:, ::-1], axis=1), 0)
+    return has, top
+
+
+def _at_top(
+    mask: npt.NDArray[np.bool_], top: npt.NDArray[np.intp]
+) -> npt.NDArray[np.bool_]:
+    """Per profile: `mask` at the top gate or one gate below it."""
+    rows = np.arange(mask.shape[0])
+    return mask[rows, top] | mask[rows, np.maximum(top - 1, 0)]
+
+
+def _beta_integral(
+    beta: ma.MaskedArray, height: npt.NDArray[np.floating]
+) -> npt.NDArray[np.floating]:
+    """Cumulative integral of attenuated backscatter from the bottom gate up (sr-1).
+
+    Masked (no-signal) and negative gates contribute nothing.
+    """
+    values = np.clip(ma.filled(beta, 0.0), 0.0, None)
+    return np.cumsum(values * np.gradient(height), axis=1)
+
+
+def _topmost_runs(
+    target: npt.NDArray[np.integer],
+) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.intp], npt.NDArray[np.bool_]]:
+    """Per profile: has-signal flag, highest signal gate, and the run ending there.
+
+    The run is the contiguous block of classified gates ending at the top gate.
+    """
+    signal = target != Target.CLEAR
+    has, top = _signal_top(signal)
+    idx = np.arange(target.shape[1])[np.newaxis, :]
+    # Base of the run: one above the highest clear gate below the top (or the
+    # bottom of the profile).
+    clear_below = ~signal & (idx <= top[:, np.newaxis])
+    base = np.where(clear_below, idx, -1).max(axis=1) + 1
+    in_run = (idx >= base[:, np.newaxis]) & (idx <= top[:, np.newaxis])
+    return has, top, in_run
+
+
+def _liquid_topped(
+    target: npt.NDArray[np.integer],
+    top: npt.NDArray[np.intp],
+    in_run: npt.NDArray[np.bool_],
+    height: npt.NDArray[np.floating],
+    max_gap: float = LIQUID_EXTINCTION_GAP,
+) -> npt.NDArray[np.bool_]:
+    """Profiles whose topmost run holds liquid within `max_gap` metres of its top."""
+    liquid = in_run & np.isin(target, [Target.DROPLET, Target.SUPERCOOLED])
+    idx = np.arange(target.shape[1])[np.newaxis, :]
+    highest = np.where(liquid, idx, -1).max(axis=1)
+    gap = height[top] - height[np.maximum(highest, 0)]
+    return (highest >= 0) & (gap <= max_gap)
+
+
+def _beam_saturation(
+    target: npt.NDArray[np.integer],
+    integral: npt.NDArray[np.floating],
+    height: npt.NDArray[np.floating],
+    *,
+    min_profiles: int = MIN_SATURATION_PROFILES,
+) -> float | None:
+    """Estimate the saturated backscatter integral from this file's liquid tops.
+
+    Profiles whose signal ends just above a liquid layer (see `_liquid_topped`)
+    are, as a population, beams extinguished in liquid: their top-of-run
+    integrals pile up at the instrument's saturation plateau I_sat = 1/(2 eta S)
+    (the O'Connor et al. 2004 calibration principle). The median of that
+    population is the plateau in the file's own calibration units -- a thin
+    cumulus pulls below it and a rain column above it, but the bulk sits on the
+    plateau. Returns None with fewer than `min_profiles` such profiles, when the
+    estimate would be unreliable (see `MIN_SATURATION_PROFILES`).
+    """
+    has, top, in_run = _topmost_runs(target)
+    liquid_topped = has & _liquid_topped(target, top, in_run, height)
+    if liquid_topped.sum() < min_profiles:
+        return None
+    rows = np.arange(target.shape[0])
+    return float(np.median(integral[rows, top][liquid_topped]))
+
+
+def _find_attenuated(
+    target: npt.NDArray[np.integer],
+    bright: npt.NDArray[np.bool_],
+    height: npt.NDArray[np.floating],
+    *,
+    integral: npt.NDArray[np.floating] | None = None,
+    saturation: float | None = None,
+    saturation_fraction: float = SATURATION_FRACTION,
+) -> npt.NDArray[np.bool_]:
+    """Mark the void above each profile's signal top where the beam was extinguished.
+
+    A masked pixel above a cloud is ambiguous on its own: clear sky and an
+    extinguished beam both return nothing. The decision therefore comes from the
+    *topmost signal run* of the profile (the contiguous classified gates ending at
+    its highest one) -- only the void above that run is ever marked, since any
+    signal higher up proves the beam got through. The run extinguishes the beam
+    when any of these hold:
+
+    - it ends within `LIQUID_EXTINCTION_GAP` of a **liquid** layer (droplet or
+      supercooled): a liquid cloud of even modest water path is optically thick
+      enough (tau ~ 3) to kill a lidar beam, and `find_liquid` keys on the
+      peak-then-sharp-decay signature that is this very attenuation. A liquid
+      layer with signal running on well above it -- a separate higher run, or
+      kilometres of aerosol over a surface-pass speck -- evidently let the beam
+      through and is not used;
+    - its highest hydrometeor is **drizzle/rain** with no droplet or ice above it
+      in the run: precipitation needs a cloud above, so not seeing one means the
+      beam died inside the rain -- the same reasoning as `DEEP_RAIN_THICKNESS`;
+    - it ends **abruptly** while still cloud-bright in a hydrometeor class at (or
+      one gate below) its top, e.g. a thick ice/snow column. Aerosol fades
+      gradually below the threshold before masking, so the void above an aerosol
+      layer stays clear (bright-but-unsourced aerosol such as marine haze is
+      excluded by requiring a hydrometeor class); likewise faint cirrus;
+    - with `integral` and `saturation` given, the backscatter **integral** at its
+      top has reached `saturation_fraction` of the saturation plateau, i.e. that
+      fraction of the beam is demonstrably lost (see `SATURATION_FRACTION`). This
+      is the physical criterion; it catches extinguished columns where no liquid
+      peak was detected (a polar low-cloud continuum, broken-cumulus edges).
+
+    Works on the despeckled `target` so screening noise in the void neither
+    defines the signal top nor counts as signal above a cloud.
+    """
+    n_time, n_gate = target.shape
+    has, top, in_run = _topmost_runs(target)
+    idx = np.arange(n_gate)[np.newaxis, :]
+    rows = np.arange(n_time)
+    hydrometeor = np.isin(
+        target,
+        [Target.DROPLET, Target.SUPERCOOLED, Target.ICE, Target.DRIZZLE_OR_RAIN],
+    )
+    run_hyd = in_run & hydrometeor
+    highest_hyd = np.where(run_hyd, idx, -1).max(axis=1)
+    rain_topped = (highest_hyd >= 0) & (
+        target[rows, np.maximum(highest_hyd, 0)] == Target.DRIZZLE_OR_RAIN
+    )
+    extinguished = (
+        _liquid_topped(target, top, in_run, height)
+        | rain_topped
+        | _at_top(bright & hydrometeor, top)
+    )
+    if integral is not None and saturation is not None:
+        extinguished |= integral[rows, top] >= saturation_fraction * saturation
+    return (has & extinguished)[:, np.newaxis] & (idx > top[:, np.newaxis])
 
 
 def _despeckle(

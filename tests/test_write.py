@@ -16,7 +16,7 @@ def _classification() -> Classification:
         [
             [Target.CLEAR, Target.AEROSOL, Target.ICE, Target.CLEAR],
             [Target.DROPLET, Target.DRIZZLE_OR_RAIN, Target.ICE, Target.SUPERCOOLED],
-            [Target.CLEAR, Target.CLEAR, Target.AEROSOL, Target.ICE],
+            [Target.CLEAR, Target.DROPLET, Target.ATTENUATED, Target.ATTENUATED],
         ],
         dtype=np.int64,
     )
@@ -34,6 +34,7 @@ def _classification() -> Classification:
         ice=false,
         rain=false,
         aerosol=false,
+        attenuated=target == Target.ATTENUATED,
         quality=quality,
         tw=np.full(target.shape, 275.0),
         t0_alt=np.array([250.0, np.nan, 300.0]),
@@ -73,7 +74,7 @@ def test_write_roundtrip_and_cf(tmp_path):
         assert tc.dtype == np.int8
         np.testing.assert_array_equal(tc[:], cls.target)
         # CF discrete-flag attributes
-        np.testing.assert_array_equal(tc.flag_values, [0, 1, 2, 3, 4, 5])
+        np.testing.assert_array_equal(tc.flag_values, [0, 1, 2, 3, 4, 5, 6])
         assert tc.flag_meanings.split()[0] == "clear_sky"
         assert len(tc.flag_meanings.split()) == len(Target)
 

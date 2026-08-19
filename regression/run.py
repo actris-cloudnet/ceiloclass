@@ -65,7 +65,8 @@ class Check:
 
     The window is the whole curtain unless ``hours`` (UTC, inclusive) and/or
     ``height_m`` (metres, inclusive) restrict it. The fraction is taken over all
-    pixels in the window, or over the non-clear pixels when ``of="classified"``.
+    pixels in the window, or over the classified (neither clear nor attenuated)
+    pixels when ``of="classified"``.
     The check passes when the measured fraction is within ``[min_frac, max_frac]``
     (either bound may be ``None``).
     """
@@ -486,6 +487,7 @@ class Result:
     strong_beta: float
     t0_median: float
     checks: dict[str, float]
+    beam_saturation: float | None = None
 
 
 def _hours(time: npt.NDArray[np.object_]) -> npt.NDArray[np.float64]:
@@ -515,7 +517,8 @@ def _measure(
     sub = target[np.ix_(tmask, hmask)]
     if sub.size == 0:
         return 0.0
-    denom = int((sub != Target.CLEAR).sum()) if check.of == "classified" else sub.size
+    classified = (sub != Target.CLEAR) & (sub != Target.ATTENUATED)
+    denom = int(classified.sum()) if check.of == "classified" else sub.size
     if denom == 0:
         return 0.0
     return float((sub == check.target.value).sum()) / denom
@@ -555,6 +558,9 @@ def _snapshot(res: Result) -> dict:
     return {
         "fractions": {k: round(v, 5) for k, v in res.fractions.items()},
         "strong_beta": float(f"{res.strong_beta:.3g}"),
+        "beam_saturation": None
+        if res.beam_saturation is None
+        else float(f"{res.beam_saturation:.3g}"),
         "t0_median": round(res.t0_median, 1),
         "checks": {k: round(v, 5) for k, v in res.checks.items()},
     }
@@ -625,6 +631,7 @@ def run_case(
         strong_beta=float(cls.strong_beta),
         t0_median=float(np.nanmedian(cls.t0_alt)),
         checks=checks,
+        beam_saturation=cls.beam_saturation,
     )
 
 
@@ -646,6 +653,14 @@ def _drifts(case: Case, res: Result, base: dict) -> list[str]:
         old, res.strong_beta, 0.0, 0.05
     ):
         out.append(f"strong_beta {old:.2e} -> {res.strong_beta:.2e}")
+    if "beam_saturation" in base:
+        old_sat, new_sat = base["beam_saturation"], res.beam_saturation
+        if (old_sat is None) != (new_sat is None) or (
+            old_sat is not None
+            and new_sat is not None
+            and _drifted(old_sat, new_sat, 0.0, 0.1)
+        ):
+            out.append(f"beam_saturation {old_sat} -> {new_sat}")
     if (old := base.get("t0_median")) is not None and _drifted(
         old, res.t0_median, 50.0, 0.0
     ):
