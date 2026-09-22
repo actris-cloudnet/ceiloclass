@@ -88,7 +88,7 @@ def find_liquid(
     *,
     peak_amp: float = 1e-6,
     max_width: float = 250,
-    min_points: int = 3,
+    min_points: int = 2,
     min_top_der: float = 1e-7,
     min_alt: float = 100,
     surface_pass: bool = True,
@@ -106,7 +106,12 @@ def find_liquid(
         height: Range (m).
         peak_amp: Minimum backscatter peak amplitude (sr-1 m-1).
         max_width: Maximum layer thickness (m).
-        min_points: Minimum non-zero gates in a layer.
+        min_points: Minimum non-zero gates in a layer. CloudnetPy uses 3; here 2
+            (the peak plus its top edge, already required), because a fog peak on
+            the lowest gate with one steep step above it spans just two gates and
+            would otherwise drop out profile by profile, streaking the fog layer
+            with aerosol gaps. Noise is rejected by `strong_beta` and
+            `min_top_der` instead.
         min_top_der: Minimum backscatter gradient above the peak.
         min_alt: Minimum peak altitude above the lowest gate (m). Not applied to
             surface peaks, which are liquid sitting on the ground by definition.

@@ -59,6 +59,34 @@ def test_find_liquid_detects_surface_fog():
     assert not is_liquid[:, 10].any()  # but only the fog layer, not the column
 
 
+def test_find_liquid_keeps_two_gate_surface_peak():
+    # Fog whose lowest gate is the peak with one steep step above it: the top
+    # walk stops at gate 1, so the layer spans only two gates. CloudnetPy's
+    # three-gate minimum rejects it (leaving gaps in a fog layer); ours keeps it.
+    height = np.arange(200) * 10.0  # 10 m gates, as CL31
+    profile = np.zeros(200)
+    profile[:15] = [
+        1.5e-3,
+        6.7e-4,
+        6.1e-4,
+        4.4e-4,
+        3.1e-4,
+        1.9e-4,
+        1.1e-4,
+        5.9e-5,
+        3.3e-5,
+        1.7e-5,
+        8.0e-6,
+        3.7e-6,
+        1.8e-6,
+        8.6e-7,
+        4.4e-7,
+    ]
+    beta = ma.array(np.tile(profile, (4, 1)))
+    assert find_liquid(beta, height)[:, 0].all()
+    assert not find_liquid(beta, height, min_points=3).any()
+
+
 def test_find_liquid_surface_pass_can_be_disabled():
     # The surface pass can be turned off (e.g. unreliable near-surface overlap):
     # the blind-zone fog is then not detected, while the rest of the search runs.
