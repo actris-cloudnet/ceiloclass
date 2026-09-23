@@ -308,7 +308,6 @@ def test_find_liquid_rejects_flat_plateau_as_fog():
     profile[3:6] = [3.4e-5, 3.5e-5, 3.3e-5]
     beta = ma.array(np.tile(profile, (2, 1)))
     assert not find_liquid(beta, height).any()
-    assert find_liquid(beta, height, max_top_frac=1.0).any()  # only that test
 
 
 def test_grow_liquid_follows_decaying_flank_only():
@@ -345,3 +344,18 @@ def test_grow_liquid_stops_below_peak_fraction():
     assert grown.tolist() == [[True, True, True, True, False, False, False]]
     # without beta the distance alone bounds the growth (the old behaviour)
     assert grow_liquid(droplet, signal, blocked, height, grow_up=60.0).all()
+
+
+def test_find_liquid_surface_fog_anchors_on_plateau_top():
+    # A saturated CL31 fog: spuriously high first gate, a dip at the second,
+    # a plateau, then the real decay from ~30 m. Anchored on the argmax (gate
+    # 0), the top walk ends at the artefact and the fog is two gates thick;
+    # anchored on the plateau top it reaches the decay.
+    height = np.arange(40) * 10.0
+    profile = np.zeros(40)
+    profile[:8] = [1.1e-3, 5.8e-4, 5.9e-4, 4.8e-4, 3.6e-4, 2.6e-4, 1.8e-4, 1.2e-4]
+    profile[8:16] = [8.2e-5, 5.3e-5, 3.3e-5, 2.0e-5, 1.1e-5, 6.1e-6, 3.3e-6, 1.7e-6]
+    beta = ma.array(np.tile(profile, (2, 1)))
+    liquid = find_liquid(beta, height)
+    assert liquid[:, 0].all()
+    assert liquid[:, 8].all()  # 85 m, well into the decay

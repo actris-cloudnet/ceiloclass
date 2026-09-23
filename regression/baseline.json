@@ -107,6 +107,23 @@
     "strong_beta": 1.06e-6,
     "t0_median": 1338.5
   },
+  "kenttarova-fog": {
+    "beam_saturation": 0.024,
+    "checks": {
+      "the fog is a continuous liquid layer": 0.98944
+    },
+    "fractions": {
+      "AEROSOL": 0.03485,
+      "ATTENUATED": 0.89719,
+      "CLEAR": 0.02483,
+      "DRIZZLE_OR_RAIN": 0.01518,
+      "DROPLET": 0.02648,
+      "ICE": 0.00037,
+      "SUPERCOOLED": 0.0011
+    },
+    "strong_beta": 1e-5,
+    "t0_median": 2134.2
+  },
   "kenttarova-low-stratus": {
     "beam_saturation": 0.0195,
     "checks": {

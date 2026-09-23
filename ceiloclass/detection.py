@@ -85,6 +85,20 @@ tail beyond the cloud, not its flank. The floor is taken per profile from its
 brightest liquid gate -- a dimmer second layer in the same profile then grows a
 little less, which is a fair price for not tracking peaks per layer."""
 
+SURFACE_PLATEAU_FRAC = 0.5
+"""Fraction of the blind-zone maximum that still counts as the fog plateau.
+
+Fog dense enough to saturate the return is flat over its lowest gates, and on
+a CL31 the first gate sits spuriously high with a dip just above it. Taking the
+argmax as the peak then starts the top walk at that artefact: the steepest
+"decay" is the spike's own drop, the layer ends at 15 m and whether it grows
+further depends on the dip -- a fog that flickers profile by profile. The
+surface pass therefore anchors on the highest gate still within this fraction
+of the maximum, the upper edge of the plateau, from where the walk meets the
+genuine decay. A fog that really peaks at the ground and falls off at once
+keeps its lowest gate as the peak.
+"""
+
 _PEAK_ORDER = 4
 """Neighbours compared each side when flagging a backscatter peak.
 
@@ -222,7 +236,12 @@ def find_liquid(
             low = beta_filled[n, :blind_zone]
             if low.max() <= peak_amp:
                 continue
-            mark_layer(n, base=0, peak=int(np.argmax(low)), min_alt=0)
+            # A dense fog saturates into a plateau rather than a peak, and the
+            # lowest gates carry the near-field artefact (a spike at the first
+            # gate); anchor on the top of the plateau so the top walk starts at
+            # the real decay instead of at an artefact dip.
+            peak = int(np.flatnonzero(low >= low.max() * SURFACE_PLATEAU_FRAC)[-1])
+            mark_layer(n, base=0, peak=peak, min_alt=0)
     return is_liquid
 
 

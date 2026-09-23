@@ -250,6 +250,26 @@ CASES: list[Case] = [
         ],
     ),
     Case(
+        id="kenttarova-fog",
+        site="kenttarova",
+        date="2022-07-16",
+        instrument="cl31",
+        note="Dense evening fog saturating the CL31 over its lowest 100 m. The "
+        "first gate carries a near-field spike, so an argmax-anchored surface "
+        "pass ended the layer at 15 m and the fog flickered profile by "
+        "profile; anchoring on the top of the plateau keeps it whole.",
+        checks=[
+            Check(
+                "the fog is a continuous liquid layer",
+                Target.DROPLET,
+                min_frac=0.8,
+                hours=(21.0, 24.0),
+                height_m=(0, 100),
+                of="classified",
+            ),
+        ],
+    ),
+    Case(
         id="kenttarova-broken-cumulus",
         site="kenttarova",
         date="2023-08-02",
