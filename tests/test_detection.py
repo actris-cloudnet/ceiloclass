@@ -277,3 +277,71 @@ def test_interpolate_along_time_clamps():
     assert np.allclose(new[0], [0.0, 100.0])  # clamped to first
     assert np.allclose(new[1], [5.0, 150.0])  # midpoint
     assert np.allclose(new[2], [10.0, 200.0])  # clamped to last
+
+
+def test_find_liquid_base_ignores_near_field_step():
+    # A CL31-like profile: a steep near-field overlap step in the lowest gates
+    # (the steepest gradient of the whole window), a bright sub-cloud plateau,
+    # then the liquid flank at 135-195 m. CloudnetPy's base search would land on
+    # the step (base 15 m, width > 250 m) and reject the layer; the flank nearest
+    # the peak keeps the base at the real cloud base.
+    height = np.arange(60) * 10.0
+    profile = np.zeros(60)
+    profile[1:3] = [9e-7, 2.5e-5]  # near-field step
+    profile[3:14] = 3.7e-5 + 2e-6 * np.sin(np.arange(11))  # noisy plateau
+    profile[14:20] = [4.7e-5, 6.4e-5, 8.6e-5, 1.1e-4, 1.4e-4, 1.6e-4]
+    profile[20:24] = [1.5e-4, 1.3e-4, 1.0e-4, 8.9e-5]
+    profile[24:45] = np.geomspace(8e-5, 2e-6, 21)
+    beta = ma.array(np.tile(profile, (2, 1)))
+    liquid = find_liquid(beta, height)
+    assert liquid[:, 19].all()  # the peak (195 m)
+    assert liquid[:, 13].all()  # base at the foot of the flank (135 m)
+    assert not liquid[:, :12].any()  # the sub-cloud plateau is not liquid
+
+
+def test_find_liquid_rejects_flat_plateau_as_fog():
+    # A bright plateau with a barely-sloping top (3.5e-5 -> 3.1e-5 over 30 m)
+    # passes CloudnetPy's absolute gradient test but is not an attenuating
+    # liquid layer: the signal must have halved by the layer top.
+    height = np.arange(40) * 10.0
+    profile = np.full(40, 3.1e-5)
+    profile[3:6] = [3.4e-5, 3.5e-5, 3.3e-5]
+    beta = ma.array(np.tile(profile, (2, 1)))
+    assert not find_liquid(beta, height).any()
+    assert find_liquid(beta, height, max_top_frac=1.0).any()  # only that test
+
+
+def test_grow_liquid_follows_decaying_flank_only():
+    # Above the core the signal decays, flattens into a plateau, then decays
+    # again: growth follows the decay and stops at the first gate that rises.
+    values = np.array([[1e-6, 5e-5, 1e-4, 4e-5, 2e-5, 2.1e-5, 3e-5, 1e-5, 1e-6]])
+    beta = ma.array(values)
+    signal = np.ones_like(values, dtype=bool)
+    blocked = np.zeros_like(signal)
+    droplet = np.zeros_like(signal)
+    droplet[0, 1:4] = True
+    height = np.arange(9) * 10.0
+    grown = grow_liquid(
+        droplet, signal, blocked, height, grow_up=50.0, grow_down=10.0, beta=beta
+    )
+    # up: gates 4 and 5 (2e-5, 2.1e-5 within tolerance), not gate 6 (rises to 3e-5)
+    # down: gate 0 is only 1e-6, below 5 % of the 1e-4 peak
+    assert grown.tolist() == [
+        [False, True, True, True, True, True, False, False, False]
+    ]
+
+
+def test_grow_liquid_stops_below_peak_fraction():
+    # A smooth decay running far below the peak: growth ends where the signal
+    # drops under GROW_MIN_FRAC of the profile's liquid peak, not at the cap.
+    values = np.array([[1e-4, 3e-5, 1e-5, 6e-6, 4e-6, 3e-6, 2e-6]])
+    beta = ma.array(values)
+    signal = np.ones_like(values, dtype=bool)
+    blocked = np.zeros_like(signal)
+    droplet = np.zeros_like(signal)
+    droplet[0, 0] = True
+    height = np.arange(7) * 10.0
+    grown = grow_liquid(droplet, signal, blocked, height, grow_up=60.0, beta=beta)
+    assert grown.tolist() == [[True, True, True, True, False, False, False]]
+    # without beta the distance alone bounds the growth (the old behaviour)
+    assert grow_liquid(droplet, signal, blocked, height, grow_up=60.0).all()

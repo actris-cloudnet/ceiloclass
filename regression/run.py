@@ -219,6 +219,37 @@ CASES: list[Case] = [
         ],
     ),
     Case(
+        id="kenttarova-low-stratus",
+        site="kenttarova",
+        date="2022-03-23",
+        instrument="cl31",
+        note="Bright (~2e-4) supercooled stratus at 150-350 m under a model 0 degC "
+        "line on the ground. The CL31 near-field step used to drag the liquid "
+        "base to 15 m so the layer failed the width test and became ice with "
+        "random supercooled pillars, while the flat sub-cloud plateau was read "
+        "as surface fog and grown into identical 0-180 m pillars.",
+        checks=[
+            Check(
+                # ~0.2 with the old base search, ~0.6 with the flank nearest
+                # the peak.
+                "the low stratus is supercooled liquid",
+                Target.SUPERCOOLED,
+                min_frac=0.45,
+                hours=(22.35, 23.0),
+                height_m=(150, 400),
+                of="classified",
+            ),
+            Check(
+                "no spurious surface fog pillars under the stratus",
+                Target.SUPERCOOLED,
+                max_frac=0.05,
+                hours=(22.35, 22.85),
+                height_m=(0, 100),
+                of="classified",
+            ),
+        ],
+    ),
+    Case(
         id="kenttarova-broken-cumulus",
         site="kenttarova",
         date="2023-08-02",

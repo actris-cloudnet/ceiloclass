@@ -48,6 +48,43 @@ the freezing region floods down only through solid ice and stops at the melt,
 instead of running on through the still-depolarizing rain shaft below it.
 """
 
+MAX_TOP_FRAC = 0.5
+"""Fraction of its peak to which a liquid layer's backscatter must fall above it.
+
+A liquid layer is a peak because the beam is attenuated inside it: within the
+top window (150 m above the peak) the signal must have fallen substantially.
+CloudnetPy checks only an absolute gradient (`min_top_der`, 1e-7 sr-1 m-1 per
+m), which a bright but flat sub-cloud plateau (3e-5 sliding to 2.7e-5 over 30 m
+on a CL31) passes -- its strongest gate then becomes a spurious surface-pass
+"fog" peak -- and which a bump inside an ice cloud passes too, so ice fall
+streaks get peppered with supercooled specks. A drop to half the peak is a
+two-way transmission of 0.5, i.e. an optical depth of ~0.35: lenient for any
+real liquid layer, but ruling out a plateau or an in-cloud bump whose signal
+runs on undiminished. The window minimum is used rather than the value at the
+layer's own top gate, which a single-gate break in the decay would put right
+above the peak.
+"""
+
+GROW_TOLERANCE = 0.1
+"""Relative rise a gate may show over its neighbour and still count as decaying.
+
+`grow_liquid` extends a layer only through gates no brighter than the one they
+grow from, i.e. along the layer's own attenuating flank, so a plateau or a
+rise into another target stops it and the growth distances are outer caps
+rather than a fixed extension every layer receives. The tolerance keeps
+single-gate noise on a smoothly decaying flank from truncating the growth at
+random heights."""
+
+GROW_MIN_FRAC = 0.05
+"""Fraction of the profile's liquid peak below which growth stops.
+
+A smooth exponential tail (a night-time fog decaying over 150 m) is "decaying"
+all the way to the noise floor, so the flank rule alone would run to the
+distance cap on every profile. Signal a factor 20 below the peak is the faint
+tail beyond the cloud, not its flank. The floor is taken per profile from its
+brightest liquid gate -- a dimmer second layer in the same profile then grows a
+little less, which is a fair price for not tracking peaks per layer."""
+
 _PEAK_ORDER = 4
 """Neighbours compared each side when flagging a backscatter peak.
 
@@ -90,6 +127,7 @@ def find_liquid(
     max_width: float = 250,
     min_points: int = 2,
     min_top_der: float = 1e-7,
+    max_top_frac: float = MAX_TOP_FRAC,
     min_alt: float = 100,
     surface_pass: bool = True,
     strong_beta: float | None = None,
@@ -113,6 +151,8 @@ def find_liquid(
             with aerosol gaps. Noise is rejected by `strong_beta` and
             `min_top_der` instead.
         min_top_der: Minimum backscatter gradient above the peak.
+        max_top_frac: Fraction of the peak to which the backscatter must fall
+            within the top window above it; see `MAX_TOP_FRAC`.
         min_alt: Minimum peak altitude above the lowest gate (m). Not applied to
             surface peaks, which are liquid sitting on the ground by definition.
         surface_pass: Run the surface pass that recovers fog / very low stratus
@@ -152,6 +192,9 @@ def find_liquid(
             lprof, height, base, peak, top, max_width, min_points, min_top_der, min_alt
         ):
             return
+        above = lprof[peak + 1 : peak + 1 + top_above_peak]
+        if above.size and above.min() > max_top_frac * lprof[peak]:
+            return  # signal never falls off above the peak: not an attenuating layer
         trimmed = _trim_base_to_strong(lprof, base, peak, strong_beta)
         if trimmed is not None:
             is_liquid[n, trimmed : top + 1] = True
@@ -217,6 +260,9 @@ def grow_liquid(
     *,
     grow_up: float = 100.0,
     grow_down: float = 10.0,
+    beta: ma.MaskedArray | None = None,
+    tolerance: float = GROW_TOLERANCE,
+    min_frac: float = GROW_MIN_FRAC,
 ) -> npt.NDArray[np.bool_]:
     """Extend liquid layers into the adjacent signal halo (cloud edges).
 
@@ -233,6 +279,13 @@ def grow_liquid(
     upward to recover it. Below the base is usually sub-cloud aerosol or drizzle,
     so grow downward only a little, to avoid absorbing it as liquid.
 
+    With `beta` given the growth also follows the data: a gate joins only when
+    it is no brighter (within `tolerance`) than the gate it grows from, i.e. the
+    layer extends along its own decaying flank and stops where the signal
+    flattens or rises again (see `GROW_TOLERANCE`), and never below `min_frac`
+    of the profile's liquid peak (see `GROW_MIN_FRAC`). Without `beta` the
+    distances alone bound it.
+
     Args:
         droplet: Liquid droplet layers (time x range).
         signal: True where the backscatter is not masked (lidar signal present).
@@ -240,14 +293,25 @@ def grow_liquid(
         height: Range (m), used to convert distances into gate counts.
         grow_up: Maximum distance to grow toward cloud top (m).
         grow_down: Maximum distance to grow toward cloud base (m).
+        beta: Screened backscatter (sr-1 m-1), to keep the growth on the flank.
+        tolerance: Relative rise over the source gate still counted as decaying.
+        min_frac: Fraction of the profile's liquid peak below which growth stops.
 
     Returns:
         The droplet mask grown into its connected signal halo.
     """
     allowed = signal & ~blocked
-    out = _grow_range(droplet, allowed, _n_elements(height, grow_up), up=True)
-    out = _grow_range(out, allowed, _n_elements(height, grow_down), up=False)
-    return out
+    up = allowed.copy()
+    down = allowed.copy()
+    if beta is not None:
+        values = ma.filled(beta, 0.0)
+        bright = values >= min_frac * np.where(droplet, values, 0).max(axis=1)[:, None]
+        up &= bright
+        down &= bright
+        up[:, 1:] &= values[:, 1:] <= (1 + tolerance) * values[:, :-1]
+        down[:, :-1] &= values[:, :-1] <= (1 + tolerance) * values[:, 1:]
+    out = _grow_range(droplet, up, _n_elements(height, grow_up), up=True)
+    return _grow_range(out, down, _n_elements(height, grow_down), up=False)
 
 
 def _grow_range(
@@ -436,19 +500,41 @@ def _trim_base_to_strong(
 
 
 def _ind_base(dprof: npt.NDArray, ind_peak: int, dist: int, lim: float) -> int:
+    """Base of a backscatter peak: the foot of its rising flank.
+
+    The flank is the contiguous run of gates, nearest below the peak, whose
+    gradient stays above `1/lim` of the steepest gradient in the `dist`-gate
+    window. CloudnetPy takes the *first* such gate anywhere in the window
+    instead, so an unrelated step far below -- the near-field overlap step in a
+    ceilometer's lowest gates (often the steepest gradient of all), or a noise
+    bump in a bright sub-cloud plateau -- drags the base 100-200 m under the
+    real cloud base and the layer then fails the width test.
+    """
     start = max(ind_peak - dist, 0)
     diffs = dprof[start:ind_peak]
-    mind = np.argmax(diffs)
-    return int(start + np.where(diffs > diffs[mind] / lim)[0][0])
+    steep = diffs > diffs.max() / lim
+    nearest = np.flatnonzero(steep)[-1]
+    gaps = np.flatnonzero(~steep[:nearest])
+    return int(start + (gaps[-1] + 1 if gaps.size else 0))
 
 
 def _ind_top(
     dprof: npt.NDArray, ind_peak: int, nprof: int, dist: int, lim: float
 ) -> int:
+    """Top of a backscatter peak: the end of its decaying flank.
+
+    Mirror of `_ind_base`: the contiguous run of gates, nearest above the peak,
+    whose gradient stays below `1/lim` of the steepest decay in the `dist`-gate
+    window, rather than CloudnetPy's *last* such gate anywhere in the window (a
+    noise dip in the faint tail above the cloud would otherwise stretch the top).
+    """
     end = min(ind_peak + dist, nprof)
     diffs = dprof[ind_peak:end]
-    mind = np.argmin(diffs)
-    return int(ind_peak + np.where(diffs < diffs[mind] / lim)[0][-1] + 1)
+    steep = diffs < diffs.min() / lim
+    nearest = np.flatnonzero(steep)[0]
+    gaps = np.flatnonzero(~steep[nearest:])
+    run_end = nearest + gaps[0] - 1 if gaps.size else steep.size - 1
+    return int(ind_peak + run_end + 1)
 
 
 def _n_elements(height: npt.NDArray[np.floating], distance: float) -> int:

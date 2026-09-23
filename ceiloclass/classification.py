@@ -283,7 +283,7 @@ def classify(
         # is the barrier to liquid growth (see _depol_adjustments).
         blocked = ice_like
     droplet = fill_thin_clouds(droplet, ~beta_mask, blocked, height)
-    droplet = grow_liquid(droplet, ~beta_mask, blocked, height)
+    droplet = grow_liquid(droplet, ~beta_mask, blocked, height, beta=beta)
     droplet = correct_supercooled(droplet, tw)
 
     if ice_like is not None:
