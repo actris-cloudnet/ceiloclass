@@ -63,10 +63,15 @@ def read_model(
     are treated as height-above-ground (no correction).
 
     Temperature (and, for wet-bulb, pressure and specific humidity) are
-    interpolated onto the ceilometer grid first; wet-bulb is then computed from
-    the interpolated fields, as CloudnetPy does -- not by interpolating a
-    wet-bulb field built on the model grid (the two differ, wet-bulb being
-    nonlinear in its inputs).
+    interpolated onto the ceilometer range grid first; wet-bulb is then computed
+    from the interpolated fields, as CloudnetPy does -- not from a wet-bulb
+    field built on the coarse model levels (the two differ, wet-bulb being
+    nonlinear in its inputs). Along time the wet-bulb field itself is
+    interpolated between the model's own time steps: the iterative solver is
+    the whole cost of this function, and running it once per model profile
+    instead of once per ceilometer profile is over a hundred times cheaper,
+    while an hour's change in the inputs is small enough that wet-bulb is
+    linear in it to well within the model's own accuracy.
 
     Args:
         path: Cloudnet model netCDF file.
@@ -121,11 +126,11 @@ def read_model(
     model_seconds = _to_seconds(model_time, ref)
     obs_seconds = _to_seconds(time, ref)
 
-    def _to_obs(field: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
-        # Stage 1: each model profile onto the obs range. Extrapolate (not clamp)
-        # outside the model levels, as CloudnetPy does, so a site below the model
+    def _on_range(field: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+        # Each model profile onto the obs range. Extrapolate (not clamp) outside
+        # the model levels, as CloudnetPy does, so a site below the model
         # surface gets a sensible near-ground value.
-        on_range = np.array(
+        return np.array(
             [
                 interp_extrap(
                     obs_range - correction[i],
@@ -135,23 +140,18 @@ def read_model(
                 for i in kept
             ]
         )
-        # Stage 2: along time.
-        return interpolate_along_time(obs_seconds, model_seconds, on_range)
 
-    on_grid = {k: _to_obs(v) for k, v in fields.items()}
-
+    on_range = {k: _on_range(v) for k, v in fields.items()}
+    tw = on_range["temperature"]
     if wet_bulb is not None:
-        tw = on_grid["temperature"].copy()
+        tw = tw.copy()
         # Solve wet-bulb only in dense enough air; the obs grid is well within
         # this, but it guards any extrapolated near-vacuum gates above the model.
-        dense = on_grid["pressure"] > _MIN_WET_BULB_PRESSURE
+        dense = on_range["pressure"] > _MIN_WET_BULB_PRESSURE
         tw[dense] = wet_bulb(
-            on_grid["temperature"][dense],
-            on_grid["pressure"][dense],
-            on_grid["q"][dense],
+            tw[dense], on_range["pressure"][dense], on_range["q"][dense]
         )
-    else:
-        tw = on_grid["temperature"]
+    tw = interpolate_along_time(obs_seconds, model_seconds, tw)
 
     model_top = np.array([heights[i][finite[i]].max() + correction[i] for i in kept])
     top = np.interp(obs_seconds, model_seconds, model_top)
