@@ -358,20 +358,20 @@ def _grow_range(
 
     With `up`, a gate joins when the gate just below it is set (growth toward
     higher range); otherwise the gate just above drives growth (toward the
-    surface).
+    surface). Computed in closed form rather than step by step: a gate is
+    reached when the nearest `mask` gate on the growth side is within `n_gates`
+    and the `allowed` run the gate lies in extends back to that seed.
     """
-    out = mask.copy()
-    for _ in range(n_gates):
-        new = np.zeros_like(out)
-        if up:
-            new[:, 1:] = out[:, :-1]
-        else:
-            new[:, :-1] = out[:, 1:]
-        new &= allowed & ~out
-        if not new.any():
-            break
-        out |= new
-    return out
+    if n_gates <= 0:
+        return mask.copy()
+    if not up:
+        flipped = _grow_range(mask[:, ::-1], allowed[:, ::-1], n_gates, up=True)
+        return flipped[:, ::-1]
+    idx = np.arange(mask.shape[1])[np.newaxis, :]
+    seed = np.maximum.accumulate(np.where(mask, idx, -1), axis=1)
+    start, _ = _run_bounds(allowed)
+    reached = allowed & (seed >= 0) & (idx - seed <= n_gates) & (start <= seed + 1)
+    return mask | reached
 
 
 def fill_thin_clouds(
@@ -409,25 +409,63 @@ def fill_thin_clouds(
 def _fill_runs(
     seed: npt.NDArray[np.bool_],
     run: npt.NDArray[np.bool_],
-    height: npt.NDArray[np.floating],
+    height: npt.NDArray[np.floating] | None = None,
     *,
     max_thickness: float | None = None,
 ) -> npt.NDArray[np.bool_]:
     """Fill each contiguous run of `run` that contains a `seed` gate.
 
-    Runs thicker than `max_thickness` (m) are skipped; `None` fills any
-    thickness. Equivalent to flood-filling `seed` along range through `run`, but
-    in a single pass.
+    Runs thicker than `max_thickness` (m, measured on `height`) are skipped;
+    `None` fills any thickness. Equivalent to flood-filling `seed` along range
+    through `run`, but in a single vectorised pass.
     """
-    height = np.asarray(height, dtype=float)
-    out = seed.copy()
-    active = seed & run
-    for i in np.nonzero(active.any(axis=1))[0]:
-        for j, k in _iter_runs(run[i]):
-            thin = max_thickness is None or height[k - 1] - height[j] <= max_thickness
-            if thin and seed[i, j:k].any():
-                out[i, j:k] |= run[i, j:k]
-    return out
+    label = _run_labels(run)
+    n_runs = int(label.max()) + 1
+    if n_runs == 0:
+        return seed.copy()
+    seeded = np.zeros(n_runs, dtype=bool)
+    seeded[label[seed & run]] = True
+    fill = run & seeded[label]
+    if max_thickness is not None:
+        h = np.asarray(height, dtype=float)
+        start, stop = _run_bounds(run)
+        fill &= h[stop - 1] - h[start] <= max_thickness
+    return seed | fill
+
+
+def _run_labels(mask: npt.NDArray[np.bool_]) -> npt.NDArray[np.intp]:
+    """Per pixel, an id for the contiguous True run of `mask` it lies in.
+
+    Ids are unique across the whole array and -1 outside `mask`. With
+    `_run_bounds`, this replaces a Python loop over profiles and runs with a
+    few cumulative passes, which is what keeps the run-based rules cheap on a
+    3000 x 3000 grid.
+    """
+    starts = mask.copy()
+    starts[..., 1:] &= ~mask[..., :-1]
+    label = np.cumsum(starts.ravel()).reshape(mask.shape) - 1
+    label[~mask] = -1
+    return label
+
+
+def _run_bounds(
+    mask: npt.NDArray[np.bool_],
+) -> tuple[npt.NDArray[np.intp], npt.NDArray[np.intp]]:
+    """Per pixel, the first index and one-past-last index of its run in `mask`.
+
+    Values outside `mask` are meaningless. See `_run_labels`.
+    """
+    n = mask.shape[-1]
+    idx = np.arange(n)
+    starts = mask.copy()
+    starts[..., 1:] &= ~mask[..., :-1]
+    ends = mask.copy()
+    ends[..., :-1] &= ~mask[..., 1:]
+    start = np.maximum.accumulate(np.where(starts, idx, 0), axis=-1)
+    stop = np.minimum.accumulate(np.where(ends, idx + 1, n)[..., ::-1], axis=-1)[
+        ..., ::-1
+    ]
+    return start, stop
 
 
 def _iter_runs(row: npt.NDArray[np.bool_]) -> Iterator[tuple[int, int]]:

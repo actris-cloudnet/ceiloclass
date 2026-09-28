@@ -26,8 +26,9 @@ from .detection import (
     _fill_runs,
     _find_t0_alt,
     _grow_range,
-    _iter_runs,
     _n_elements,
+    _run_bounds,
+    _run_labels,
     _window_count,
     correct_supercooled,
     fill_thin_clouds,
@@ -618,12 +619,8 @@ def _thin_runs(
 ) -> npt.NDArray[np.bool_]:
     """Mark gates in vertical `mask` runs no thicker than `max_thickness` metres."""
     h = np.asarray(height, dtype=float)
-    out = np.zeros_like(mask)
-    for i in np.nonzero(mask.any(axis=1))[0]:
-        for j, k in _iter_runs(mask[i]):
-            if h[k - 1] - h[j] <= max_thickness:
-                out[i, j:k] = True
-    return out
+    start, stop = _run_bounds(mask)
+    return mask & (h[stop - 1] - h[start] <= max_thickness)
 
 
 def _melt_band_below_ice(
@@ -681,23 +678,10 @@ def _flood_connected(
     grown = seed & allowed
     while True:
         prev = grown
-        grown = _fill_axis_runs(grown, allowed)
-        grown = _fill_axis_runs(grown.T, allowed.T).T
+        grown = _fill_runs(grown, allowed)
+        grown = _fill_runs(grown.T, allowed.T).T
         if (grown == prev).all():
             return grown
-
-
-def _fill_axis_runs(
-    seed: npt.NDArray[np.bool_],
-    allowed: npt.NDArray[np.bool_],
-) -> npt.NDArray[np.bool_]:
-    """Fill each contiguous run of `allowed` along the last axis that has a seed."""
-    out = seed.copy()
-    for i in np.nonzero(seed.any(axis=1))[0]:
-        for j, k in _iter_runs(allowed[i]):
-            if seed[i, j:k].any():
-                out[i, j:k] = True
-    return out
 
 
 def _source_connected(
@@ -733,19 +717,22 @@ def _source_connected(
         grown[1:] |= src[:-1]
         grown[:-1] |= src[1:]
         src = grown
+    n_gate = signal.shape[1]
     if max_gap > 0:
-        signal = signal.copy()
-        n_gate = signal.shape[1]
-        for i in range(signal.shape[0]):
-            for j, k in _iter_runs(~signal[i]):
-                if j > 0 and k < n_gate and k - j <= max_gap:
-                    signal[i, j:k] = True
-    # Propagate "a cloud sits above, through unbroken signal" downward gate by
-    # gate. Gate g inherits from the gate above (g+1) only when that gate carries
-    # signal, so a clear-air gate breaks the path.
+        start, stop = _run_bounds(~signal)
+        bridged = ~signal & (start > 0) & (stop < n_gate) & (stop - start <= max_gap)
+        signal = signal | bridged
+    # A gate is sourced when the signal run just above it holds a cloud gate at
+    # or above its next gate: per run, find the highest cloud gate, then compare.
+    label = _run_labels(signal)
+    n_runs = int(label.max()) + 1
+    highest_cloud = np.full(n_runs, -1)
+    in_run = signal & src
+    np.maximum.at(highest_cloud, label[in_run], np.nonzero(in_run)[1])
+    idx = np.arange(n_gate)[np.newaxis, :]
     above = np.zeros_like(src)
-    for g in range(src.shape[1] - 2, -1, -1):
-        above[:, g] = signal[:, g + 1] & (src[:, g + 1] | above[:, g + 1])
+    if n_runs:
+        above[:, :-1] = signal[:, 1:] & (highest_cloud[label[:, 1:]] >= idx[:, 1:])
     return above
 
 

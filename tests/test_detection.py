@@ -359,3 +359,48 @@ def test_find_liquid_surface_fog_anchors_on_plateau_top():
     liquid = find_liquid(beta, height)
     assert liquid[:, 0].all()
     assert liquid[:, 8].all()  # 85 m, well into the decay
+
+
+def test_run_labels_and_bounds_match_iter_runs():
+    from ceiloclass.detection import _iter_runs, _run_bounds, _run_labels
+
+    rng = np.random.default_rng(0)
+    mask = rng.random((50, 40)) < 0.6
+    mask[3] = False  # an empty profile
+    mask[4] = True  # a full one
+    label = _run_labels(mask)
+    start, stop = _run_bounds(mask)
+    expected_label = np.full(mask.shape, -1)
+    run_id = 0
+    for i in range(mask.shape[0]):
+        for j, k in _iter_runs(mask[i]):
+            expected_label[i, j:k] = run_id
+            assert (start[i, j:k] == j).all() and (stop[i, j:k] == k).all()
+            run_id += 1
+    assert (label == expected_label).all()
+
+
+def test_grow_range_closed_form_matches_stepwise():
+    from ceiloclass.detection import _grow_range
+
+    def stepwise(mask, allowed, n_gates, up):
+        out = mask.copy()
+        for _ in range(n_gates):
+            new = np.zeros_like(out)
+            if up:
+                new[:, 1:] = out[:, :-1]
+            else:
+                new[:, :-1] = out[:, 1:]
+            new &= allowed & ~out
+            if not new.any():
+                break
+            out |= new
+        return out
+
+    rng = np.random.default_rng(1)
+    for n_gates in (0, 1, 3, 10, 60):
+        mask = rng.random((30, 50)) < 0.05
+        allowed = rng.random((30, 50)) < 0.7
+        for up in (True, False):
+            got = _grow_range(mask, allowed, n_gates, up=up)
+            assert (got == stepwise(mask, allowed, n_gates, up)).all()
