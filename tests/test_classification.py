@@ -264,6 +264,22 @@ def test_extend_ice_to_cloud_base_clips_transient_deep_run():
     assert out[10, 8:16].all()
 
 
+def test_extend_ice_to_cloud_base_skips_grounded_run():
+    # A boundary layer whose aerosol top meets a low cloud base is one cold
+    # signal run from the ground up to the ice: virga never touches the ground,
+    # so a grounded run is left alone (Kenttarova 2024-02-11, ice to the ground
+    # under a supercooled stratus for an hour).
+    n_time, n_gate = 6, 20
+    height = np.arange(n_gate) * 100.0
+    allowed = np.zeros((n_time, n_gate), dtype=bool)
+    allowed[:, 1:16] = True  # from just above the lowest gate up to the ice
+    ice = np.zeros((n_time, n_gate), dtype=bool)
+    ice[:, 12:16] = True
+    out = _extend_ice_to_cloud_base(ice, allowed, height)
+    assert (out == ice).all()  # nothing filled
+    assert _extend_ice_to_cloud_base(ice, allowed, height, ground=0.0)[:, 1:16].all()
+
+
 def test_melt_band_below_ice_reaches_t0_from_ice_base():
     n_time, n_gate = 8, 16
     height = np.arange(n_gate) * 100.0
@@ -453,6 +469,31 @@ def test_find_attenuated_bright_aerosol_top_stays_clear():
     bright = np.zeros_like(target, dtype=bool)
     bright[0, 2:12] = True
     assert not _find_attenuated(target, bright, _H).any()
+
+
+def test_find_attenuated_spent_liquid_tail_is_not_aerosol():
+    # Faint signal decaying above a liquid layer whose integral has reached
+    # saturation is the layer's dying tail: it joins the attenuated void. Above
+    # a thin layer the beam passes through (low integral) it stays aerosol, and
+    # a real aerosol layer (flat/rising beta) above the tail is kept either way.
+    target = _column(
+        (2, 6, Target.AEROSOL), (6, 10, Target.DROPLET), (10, 16, Target.AEROSOL)
+    )
+    bright = np.zeros_like(target, dtype=bool)
+    beta = np.zeros(target.shape)
+    beta[0, 2:6] = 1e-6
+    beta[0, 6:10] = [1e-4, 3e-4, 2e-4, 1e-4]
+    beta[0, 10:13] = [3e-5, 1e-5, 2e-6]  # decaying tail
+    beta[0, 13:16] = [2e-6, 2e-6, 2e-6]  # a flat aerosol layer above it
+    integral = np.cumsum(beta * 100.0, axis=1)  # saturated: 0.07 at the top
+    att = _find_attenuated(target, bright, _H, integral=integral, saturation=0.03)
+    assert att[0, 10:13].all()  # the tail
+    assert not att[0, 13:16].any() and not att[0, :10].any()  # aerosol kept
+    assert att[0, 16:].all()  # the void
+    thin = integral * 0.1  # a layer the beam passes through: nothing is marked
+    assert not _find_attenuated(
+        target, bright, _H, integral=thin, saturation=0.03
+    ).any()
 
 
 def test_find_attenuated_saturated_integral_marks_void():

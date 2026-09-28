@@ -270,6 +270,26 @@ CASES: list[Case] = [
         ],
     ),
     Case(
+        id="kenttarova-ice-pillar",
+        site="kenttarova",
+        date="2024-02-11",
+        instrument="cl31",
+        note="Sub-freezing column with a supercooled stratus sinking into the "
+        "boundary-layer aerosol. The no-depol ice fill used to flood the "
+        "ground-connected aerosol run below the cloud's ice rim, painting an "
+        "hour of boundary layer as ice; grounded runs are now never filled.",
+        checks=[
+            Check(
+                "the boundary layer under the stratus is aerosol, not ice",
+                Target.ICE,
+                max_frac=0.10,
+                hours=(20.6, 21.5),
+                height_m=(0, 350),
+                of="classified",
+            ),
+        ],
+    ),
+    Case(
         id="kenttarova-broken-cumulus",
         site="kenttarova",
         date="2023-08-02",

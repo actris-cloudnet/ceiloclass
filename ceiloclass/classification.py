@@ -111,6 +111,16 @@ kilometres of aerosol above a surface-pass liquid speck in a dust column -- show
 the beam went on, and such a profile is neither attenuated by that liquid nor a
 sample of the saturation plateau."""
 
+TAIL_DECAY = 0.8
+"""Largest gate-to-gate ratio still counted as a liquid layer's dying tail.
+
+Above a liquid layer that has spent the beam the signal falls off
+exponentially, halving every gate or two, until it meets the noise floor.
+Aerosol decreases only gently with height (on the regression days 86-100% of
+consecutive aerosol gates are within 10% of each other), so requiring a real
+drop per gate lets `_find_attenuated` follow the tail while stopping within a
+gate or two of entering a genuine aerosol layer above it."""
+
 MIN_SATURATION_PROFILES = 200
 """Liquid-topped profiles needed to estimate the saturation integral per file.
 
@@ -551,6 +561,7 @@ def _extend_ice_to_cloud_base(
     height: npt.NDArray[np.floating],
     *,
     smooth_window: int = 10,
+    ground: float = 100.0,
 ) -> npt.NDArray[np.bool_]:
     """Extend ice through each contiguous cold-signal run that contains ice.
 
@@ -574,8 +585,15 @@ def _extend_ice_to_cloud_base(
     its rolling median (`_clip_to_median_base`), so a transient single-profile
     contact between e.g. a dust top and an overlying cloud base cannot flood
     the dust layer; a cold aerosol run that touches no ice at all is never
-    filled in the first place.
+    filled in the first place. Runs connected to the ground (within
+    `ground` metres of the lowest gate) are never filled either: virga hangs
+    in the air, whereas a boundary layer whose aerosol top meets a low cloud
+    base is one ground-to-cloud run of cold signal, and filling it would turn
+    the whole boundary layer into ice under every low winter cloud.
     """
+    near_ground = (np.asarray(height, dtype=float) - height[0] <= ground)[np.newaxis]
+    grounded = _fill_runs(allowed & near_ground, allowed, height)
+    allowed = allowed & ~grounded
     filled = _fill_runs(ice, allowed, height)
     if not (filled & ~ice).any():
         return ice
@@ -966,6 +984,12 @@ def _find_attenuated(
       is the physical criterion; it catches extinguished columns where no liquid
       peak was detected (a polar low-cloud continuum, broken-cumulus edges).
 
+    With the integral available, the run's aerosol decaying away above a liquid
+    layer whose integral has reached that fraction is marked too: it is the
+    layer's dying tail, not aerosol behind it. Aerosol above a thin liquid
+    layer the beam passes through (integral still low), or a flat/rising
+    aerosol layer above the tail, is left alone.
+
     Works on the despeckled `target` so screening noise in the void neither
     defines the signal top nor counts as signal above a cloud.
     """
@@ -987,9 +1011,30 @@ def _find_attenuated(
         | rain_topped
         | _at_top(bright & hydrometeor, top)
     )
-    if integral is not None and saturation is not None:
-        extinguished |= integral[rows, top] >= saturation_fraction * saturation
-    return (has & extinguished)[:, np.newaxis] & (idx > top[:, np.newaxis])
+    void = (has & extinguished)[:, np.newaxis] & (idx > top[:, np.newaxis])
+    if integral is None or saturation is None:
+        return void
+    extinguished |= integral[rows, top] >= saturation_fraction * saturation
+    void |= (has & extinguished)[:, np.newaxis] & (idx > top[:, np.newaxis])
+    # The faint tail above a liquid layer that has already spent the beam is
+    # the layer's own dying signal, not aerosol -- nothing behind it can be
+    # resolved -- so it joins the void. Two guards keep this from swallowing
+    # real aerosol: the layer's integral must have reached saturation (above a
+    # thin layer the beam passes through, the signal is real), and only gates
+    # still falling steeply from the liquid top count (see TAIL_DECAY) -- an
+    # aerosol layer above the tail stops the conversion within a gate or two.
+    liquid = in_run & np.isin(target, [Target.DROPLET, Target.SUPERCOOLED])
+    highest_liquid = np.where(liquid, idx, -1).max(axis=1)
+    spent = (highest_liquid >= 0) & (
+        integral[rows, np.maximum(highest_liquid, 0)]
+        >= saturation_fraction * saturation
+    )
+    seed = spent[:, np.newaxis] & (idx == highest_liquid[:, np.newaxis])
+    values = np.diff(integral, axis=1, prepend=0.0)  # beta * dz, gate by gate
+    decaying = np.ones_like(seed)
+    decaying[:, 1:] = values[:, 1:] <= TAIL_DECAY * values[:, :-1]
+    tail = in_run & (target == Target.AEROSOL) & decaying
+    return void | (_grow_range(seed, tail, n_gate, up=True) & tail)
 
 
 def _despeckle(

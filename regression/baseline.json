@@ -75,34 +75,34 @@
   "kenttarova-broken-cumulus": {
     "beam_saturation": 0.0205,
     "checks": {
-      "morning drizzle shafts are kept whole": 0.7881,
-      "the cloud-free morning boundary layer stays aerosol": 0.52771
+      "morning drizzle shafts are kept whole": 0.79001,
+      "the cloud-free morning boundary layer stays aerosol": 0.39138
     },
     "fractions": {
-      "AEROSOL": 0.03584,
-      "ATTENUATED": 0.75609,
-      "CLEAR": 0.13994,
-      "DRIZZLE_OR_RAIN": 0.04431,
-      "DROPLET": 0.02157,
-      "ICE": 0.00014,
-      "SUPERCOOLED": 0.00212
+      "AEROSOL": 0.03364,
+      "ATTENUATED": 0.75845,
+      "CLEAR": 0.13993,
+      "DRIZZLE_OR_RAIN": 0.04478,
+      "DROPLET": 0.02094,
+      "ICE": 0.0002,
+      "SUPERCOOLED": 0.00206
     },
     "strong_beta": 1.26e-6,
     "t0_median": 2629.9
   },
   "kenttarova-drizzle": {
-    "beam_saturation": 0.0309,
+    "beam_saturation": 0.031,
     "checks": {
-      "real sub-cloud drizzle is retained": 0.01475
+      "real sub-cloud drizzle is retained": 0.01527
     },
     "fractions": {
-      "AEROSOL": 0.04244,
-      "ATTENUATED": 0.71881,
+      "AEROSOL": 0.04249,
+      "ATTENUATED": 0.71898,
       "CLEAR": 0.18751,
-      "DRIZZLE_OR_RAIN": 0.01475,
-      "DROPLET": 0.00778,
-      "ICE": 0.02152,
-      "SUPERCOOLED": 0.00717
+      "DRIZZLE_OR_RAIN": 0.01527,
+      "DROPLET": 0.00707,
+      "ICE": 0.02198,
+      "SUPERCOOLED": 0.0067
     },
     "strong_beta": 1.06e-6,
     "t0_median": 1338.5
@@ -110,11 +110,11 @@
   "kenttarova-fog": {
     "beam_saturation": 0.024,
     "checks": {
-      "the fog is a continuous liquid layer": 0.98944
+      "the fog is a continuous liquid layer": 0.99455
     },
     "fractions": {
-      "AEROSOL": 0.03485,
-      "ATTENUATED": 0.89719,
+      "AEROSOL": 0.03032,
+      "ATTENUATED": 0.90173,
       "CLEAR": 0.02483,
       "DRIZZLE_OR_RAIN": 0.01518,
       "DROPLET": 0.02648,
@@ -124,20 +124,37 @@
     "strong_beta": 1e-5,
     "t0_median": 2134.2
   },
+  "kenttarova-ice-pillar": {
+    "beam_saturation": 0.00323,
+    "checks": {
+      "the boundary layer under the stratus is aerosol, not ice": 0.03925
+    },
+    "fractions": {
+      "AEROSOL": 0.03393,
+      "ATTENUATED": 0.23738,
+      "CLEAR": 0.72108,
+      "DRIZZLE_OR_RAIN": 6e-5,
+      "DROPLET": 8e-5,
+      "ICE": 0.00215,
+      "SUPERCOOLED": 0.00531
+    },
+    "strong_beta": 3.05e-6,
+    "t0_median": 5.0
+  },
   "kenttarova-low-stratus": {
     "beam_saturation": 0.0195,
     "checks": {
-      "no spurious surface fog pillars under the stratus": 0.02113,
-      "the low stratus is supercooled liquid": 0.76125
+      "no spurious surface fog pillars under the stratus": 0.01937,
+      "the low stratus is supercooled liquid": 0.7596
     },
     "fractions": {
-      "AEROSOL": 0.03496,
+      "AEROSOL": 0.03646,
       "ATTENUATED": 0.47712,
       "CLEAR": 0.41964,
-      "DRIZZLE_OR_RAIN": 0.00571,
-      "DROPLET": 0.00018,
-      "ICE": 0.0489,
-      "SUPERCOOLED": 0.01348
+      "DRIZZLE_OR_RAIN": 0.00577,
+      "DROPLET": 0.00012,
+      "ICE": 0.04753,
+      "SUPERCOOLED": 0.01337
     },
     "strong_beta": 1.04e-6,
     "t0_median": 205.8
