@@ -485,10 +485,10 @@ def test_liquid_tail_relabels_dying_signal_above_spent_layer():
     beta[0, 6:10] = [1e-4, 3e-4, 2e-4, 1e-4]
     beta[0, 10:13] = [3e-5, 1e-5, 2e-6]  # decaying tail, then nothing
     integral = np.cumsum(beta * 100.0, axis=1)  # saturated: 0.07 at the top
-    tail = _liquid_tail(target, integral, 0.03)
+    tail = _liquid_tail(target, beta, integral, 0.03)
     assert tail[0, 10:13].all() and not tail[0, 13:].any() and not tail[0, :10].any()
     # A layer the beam passes through (low integral): nothing is relabelled.
-    assert not _liquid_tail(target, integral * 0.1, 0.03).any()
+    assert not _liquid_tail(target, beta, integral * 0.1, 0.03).any()
 
 
 def test_liquid_tail_keeps_layer_with_brighter_signal_above():
@@ -505,10 +505,10 @@ def test_liquid_tail_keeps_layer_with_brighter_signal_above():
     beta[0, 10:13] = [3e-5, 1e-5, 2e-6]  # decaying tail
     beta[0, 13:16] = [3e-6, 5e-6, 5e-6]  # a brighter aerosol layer above it
     integral = np.cumsum(beta * 100.0, axis=1)  # saturated, yet signal goes on
-    assert not _liquid_tail(target, integral, 0.03).any()
+    assert not _liquid_tail(target, beta, integral, 0.03).any()
     beta[0, 13:16] = [3e-6, 2e-6, 3e-6]  # only floor-level remnants above
     integral = np.cumsum(beta * 100.0, axis=1)
-    tail = _liquid_tail(target, integral, 0.03)
+    tail = _liquid_tail(target, beta, integral, 0.03)
     assert tail[0, 10:13].all() and not tail[0, 13:].any()
 
 

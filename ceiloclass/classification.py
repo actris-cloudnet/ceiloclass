@@ -25,6 +25,7 @@ from .detection import (
     ICE_DEPOL_LIMIT,
     _fill_runs,
     _find_t0_alt,
+    _flank_mask,
     _grow_range,
     _iter_runs,
     _n_elements,
@@ -389,11 +390,10 @@ def classify(
         beam_saturation = _beam_saturation(target, integral, height)
     if beam_saturation is not None:
         # The dying tail above a liquid layer that spent the beam is still that
-        # cloud (see _liquid_tail); label it with the layer's liquid class.
-        tail = _liquid_tail(target, integral, beam_saturation)
-        target = np.where(
-            tail, np.where(cold, Target.SUPERCOOLED, Target.DROPLET), target
-        )
+        # cloud (see _liquid_tail); label it with the layer's liquid class, as
+        # _assemble would.
+        tail = _liquid_tail(target, ma.filled(beta, 0.0), integral, beam_saturation)
+        target[tail] = np.where(cold[tail], Target.SUPERCOOLED, Target.DROPLET)
         droplet, ice, aerosol = droplet | tail, ice & ~tail, aerosol & ~tail
     attenuated = _find_attenuated(
         target, bright, height, integral=integral, saturation=beam_saturation
@@ -604,12 +604,14 @@ def _extend_ice_to_cloud_base(
     contact between e.g. a dust top and an overlying cloud base cannot flood
     the dust layer; a cold aerosol run that touches no ice at all is never
     filled in the first place. Runs connected to the ground (within
-    `ground` metres of the lowest gate) are never filled either: virga hangs
-    in the air, whereas a boundary layer whose aerosol top meets a low cloud
-    base is one ground-to-cloud run of cold signal, and filling it would turn
-    the whole boundary layer into ice under every low winter cloud.
+    `ground` metres of the lowest gate) are never filled either, as a prior:
+    faint cold signal reaching the ground on a no-depol instrument is almost
+    always boundary-layer aerosol whose top meets a low cloud base -- one
+    ground-to-cloud run that would otherwise turn the whole boundary layer
+    into ice under every low winter cloud -- while the virga this fill is for
+    hangs in the air. (Snow reaching the ground stays ice where it is bright.)
     """
-    near_ground = (np.asarray(height, dtype=float) - height[0] <= ground)[np.newaxis]
+    near_ground = (height <= height[0] + ground)[np.newaxis]
     grounded = _fill_runs(allowed & near_ground, allowed, height)
     allowed = allowed & ~grounded
     filled = _fill_runs(ice, allowed, height)
@@ -875,14 +877,18 @@ def _adaptive_strong_beta(
     return float(min(threshold, centers[peak] * max_peak_ratio, max_strong_beta))
 
 
+def _highest(mask: npt.NDArray[np.bool_]) -> npt.NDArray[np.intp]:
+    """Per profile: the index of the highest True gate, or -1 if there is none."""
+    idx = np.arange(mask.shape[1])[np.newaxis, :]
+    return np.where(mask, idx, -1).max(axis=1)
+
+
 def _signal_top(
     signal: npt.NDArray[np.bool_],
 ) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.intp]]:
     """Per profile: whether any signal exists, and the index of its highest gate."""
-    n_gate = signal.shape[1]
-    has = signal.any(axis=1)
-    top = np.where(has, n_gate - 1 - np.argmax(signal[:, ::-1], axis=1), 0)
-    return has, top
+    top = _highest(signal)
+    return top >= 0, np.maximum(top, 0)
 
 
 def _at_top(
@@ -916,8 +922,7 @@ def _topmost_runs(
     idx = np.arange(target.shape[1])[np.newaxis, :]
     # Base of the run: one above the highest clear gate below the top (or the
     # bottom of the profile).
-    clear_below = ~signal & (idx <= top[:, np.newaxis])
-    base = np.where(clear_below, idx, -1).max(axis=1) + 1
+    base = _highest(~signal & (idx <= top[:, np.newaxis])) + 1
     in_run = (idx >= base[:, np.newaxis]) & (idx <= top[:, np.newaxis])
     return has, top, in_run
 
@@ -930,11 +935,15 @@ def _liquid_topped(
     max_gap: float = LIQUID_EXTINCTION_GAP,
 ) -> npt.NDArray[np.bool_]:
     """Profiles whose topmost run holds liquid within `max_gap` metres of its top."""
-    liquid = in_run & np.isin(target, [Target.DROPLET, Target.SUPERCOOLED])
-    idx = np.arange(target.shape[1])[np.newaxis, :]
-    highest = np.where(liquid, idx, -1).max(axis=1)
-    gap = height[top] - height[np.maximum(highest, 0)]
-    return (highest >= 0) & (gap <= max_gap)
+    highest = _highest_liquid(target, in_run)
+    return (highest >= 0) & (height[top] - height[highest] <= max_gap)
+
+
+def _highest_liquid(
+    target: npt.NDArray[np.integer], in_run: npt.NDArray[np.bool_]
+) -> npt.NDArray[np.intp]:
+    """Per profile: the highest liquid gate of the topmost run, or -1."""
+    return _highest(in_run & np.isin(target, [Target.DROPLET, Target.SUPERCOOLED]))
 
 
 def _beam_saturation(
@@ -1013,10 +1022,9 @@ def _find_attenuated(
         target,
         [Target.DROPLET, Target.SUPERCOOLED, Target.ICE, Target.DRIZZLE_OR_RAIN],
     )
-    run_hyd = in_run & hydrometeor
-    highest_hyd = np.where(run_hyd, idx, -1).max(axis=1)
+    highest_hyd = _highest(in_run & hydrometeor)
     rain_topped = (highest_hyd >= 0) & (
-        target[rows, np.maximum(highest_hyd, 0)] == Target.DRIZZLE_OR_RAIN
+        target[rows, highest_hyd] == Target.DRIZZLE_OR_RAIN
     )
     extinguished = (
         _liquid_topped(target, top, in_run, height)
@@ -1030,11 +1038,13 @@ def _find_attenuated(
 
 def _liquid_tail(
     target: npt.NDArray[np.integer],
+    values: npt.NDArray[np.floating],
     integral: npt.NDArray[np.floating],
     saturation: float,
     *,
     saturation_fraction: float = SATURATION_FRACTION,
     tail_decay: float = TAIL_DECAY,
+    tail_recovery: float = TAIL_RECOVERY,
 ) -> npt.NDArray[np.bool_]:
     """Mark the dying tail above a liquid layer that has spent the beam.
 
@@ -1047,36 +1057,34 @@ def _liquid_tail(
 
     - the backscatter integral at the layer's top has reached
       `saturation_fraction` of the saturation plateau (the beam is spent);
-    - each tail gate falls to at most `tail_decay` of the one below it (a real
-      aerosol layer decreases only gently with height and stops the flood
-      within a gate or two, see `TAIL_DECAY`);
-    - the signal never recovers above the tail: whatever remains of the run
-      stays below `TAIL_RECOVERY` times the level the tail decayed to (noise
-      floor, or the end of the signal). A layer sitting inside a deeper aerosol
-      or ice column, with brighter signal continuing above, has not
-      demonstrably extinguished the beam and its surroundings are never turned
-      into liquid, whatever the integral.
+    - each tail gate falls to at most `tail_decay` of the one below it (see
+      `TAIL_DECAY`);
+    - the signal never recovers above the tail (see `TAIL_RECOVERY`).
 
-    Only the topmost signal run of each profile is considered.
+    `values` is the unmasked backscatter. Only the topmost signal run of each
+    profile is considered.
     """
     n_gate = target.shape[1]
-    has, top, in_run = _topmost_runs(target)
+    _, _, in_run = _topmost_runs(target)
     idx = np.arange(n_gate)[np.newaxis, :]
     rows = np.arange(target.shape[0])
-    liquid = in_run & np.isin(target, [Target.DROPLET, Target.SUPERCOOLED])
-    highest = np.where(liquid, idx, -1).max(axis=1)
+    highest = _highest_liquid(target, in_run)
     spent = (highest >= 0) & (
-        integral[rows, np.maximum(highest, 0)] >= saturation_fraction * saturation
+        integral[rows, highest] >= saturation_fraction * saturation
     )
-    seed = spent[:, np.newaxis] & (idx == highest[:, np.newaxis])
-    values = np.diff(integral, axis=1, prepend=0.0)  # beta * dz, gate by gate
-    decaying = np.ones_like(seed)
-    decaying[:, 1:] = values[:, 1:] <= tail_decay * values[:, :-1]
-    allowed = in_run & np.isin(target, [Target.AEROSOL, Target.ICE]) & decaying
-    tail = _grow_range(seed, allowed, n_gate, up=True) & allowed
-    tail_top = np.where(tail, idx, -1).max(axis=1)
-    above = np.where(in_run & (idx > tail_top[:, np.newaxis]), values, 0.0)
-    recovers = above.max(axis=1) > TAIL_RECOVERY * values[rows, np.maximum(tail_top, 0)]
+    allowed = (
+        in_run
+        & np.isin(target, [Target.AEROSOL, Target.ICE])
+        & _flank_mask(values, tail_decay, up=True)
+    )
+    # The tail is the contiguous allowed run just above the liquid: everything
+    # from the gate above the liquid up to the first gate that is not allowed.
+    above_liquid = idx > highest[:, np.newaxis]
+    first_stop = np.where(above_liquid & ~allowed, idx, n_gate).min(axis=1)
+    tail = spent[:, np.newaxis] & above_liquid & (idx < first_stop[:, np.newaxis])
+    tail_top = _highest(tail)
+    rest = np.where(in_run & (idx > tail_top[:, np.newaxis]), values, 0.0)
+    recovers = rest.max(axis=1) > tail_recovery * values[rows, tail_top]
     return tail & ~recovers[:, np.newaxis]
 
 

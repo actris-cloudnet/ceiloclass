@@ -320,17 +320,31 @@ def grow_liquid(
         The droplet mask grown into its connected signal halo.
     """
     allowed = signal & ~blocked
-    up = allowed.copy()
-    down = allowed.copy()
+    up = down = allowed
     if beta is not None:
         values = ma.filled(beta, 0.0)
-        bright = values >= min_frac * np.where(droplet, values, 0).max(axis=1)[:, None]
-        up &= bright
-        down &= bright
-        up[:, 1:] &= values[:, 1:] <= (1 + tolerance) * values[:, :-1]
-        down[:, :-1] &= values[:, :-1] <= (1 + tolerance) * values[:, 1:]
+        floor = min_frac * np.where(droplet, values, 0.0).max(axis=1)[:, np.newaxis]
+        allowed = allowed & (values >= floor)
+        up = allowed & _flank_mask(values, 1 + tolerance, up=True)
+        down = allowed & _flank_mask(values, 1 + tolerance, up=False)
     out = _grow_range(droplet, up, _n_elements(height, grow_up), up=True)
     return _grow_range(out, down, _n_elements(height, grow_down), up=False)
+
+
+def _flank_mask(
+    values: npt.NDArray[np.floating], ratio: float, *, up: bool
+) -> npt.NDArray[np.bool_]:
+    """Gates no brighter than `ratio` times the neighbour they would grow from.
+
+    With `up` the neighbour is the gate below (growth toward higher range),
+    otherwise the gate above; the edge gate with no such neighbour is False.
+    """
+    out = np.zeros(values.shape, dtype=bool)
+    if up:
+        out[:, 1:] = values[:, 1:] <= ratio * values[:, :-1]
+    else:
+        out[:, :-1] = values[:, :-1] <= ratio * values[:, 1:]
+    return out
 
 
 def _grow_range(
@@ -348,15 +362,15 @@ def _grow_range(
     """
     out = mask.copy()
     for _ in range(n_gates):
-        neighbour = np.zeros_like(out)
+        new = np.zeros_like(out)
         if up:
-            neighbour[:, 1:] |= out[:, :-1]
+            new[:, 1:] = out[:, :-1]
         else:
-            neighbour[:, :-1] |= out[:, 1:]
-        grown = out | (neighbour & allowed)
-        if grown.sum() == out.sum():
+            new[:, :-1] = out[:, 1:]
+        new &= allowed & ~out
+        if not new.any():
             break
-        out = grown
+        out |= new
     return out
 
 
@@ -532,9 +546,8 @@ def _ind_base(dprof: npt.NDArray, ind_peak: int, dist: int, lim: float) -> int:
     start = max(ind_peak - dist, 0)
     diffs = dprof[start:ind_peak]
     steep = diffs > diffs.max() / lim
-    nearest = np.flatnonzero(steep)[-1]
-    gaps = np.flatnonzero(~steep[:nearest])
-    return int(start + (gaps[-1] + 1 if gaps.size else 0))
+    foot, _ = list(_iter_runs(steep))[-1]
+    return int(start + foot)
 
 
 def _ind_top(
@@ -550,10 +563,10 @@ def _ind_top(
     end = min(ind_peak + dist, nprof)
     diffs = dprof[ind_peak:end]
     steep = diffs < diffs.min() / lim
-    nearest = np.flatnonzero(steep)[0]
-    gaps = np.flatnonzero(~steep[nearest:])
-    run_end = nearest + gaps[0] - 1 if gaps.size else steep.size - 1
-    return int(ind_peak + run_end + 1)
+    # No decaying flank at all (flat above the peak): the top is the peak
+    # itself, which `_is_valid_peak` rejects.
+    _, stop = next(_iter_runs(steep), (0, 0))
+    return int(ind_peak + stop)
 
 
 def _n_elements(height: npt.NDArray[np.floating], distance: float) -> int:
