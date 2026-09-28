@@ -1,17 +1,17 @@
 {
   "bucharest-doppler": {
-    "beam_saturation": 0.00667,
+    "beam_saturation": 0.00836,
     "checks": {
-      "something is classified": 0.4735
+      "something is classified": 0.50695
     },
     "fractions": {
-      "AEROSOL": 0.21228,
-      "ATTENUATED": 0.29881,
-      "CLEAR": 0.4735,
-      "DRIZZLE_OR_RAIN": 0.00302,
-      "DROPLET": 0.00475,
-      "ICE": 0.00539,
-      "SUPERCOOLED": 0.00225
+      "AEROSOL": 0.21182,
+      "ATTENUATED": 0.26535,
+      "CLEAR": 0.50695,
+      "DRIZZLE_OR_RAIN": 0.00308,
+      "DROPLET": 0.00515,
+      "ICE": 0.00506,
+      "SUPERCOOLED": 0.00259
     },
     "strong_beta": 4.06e-7,
     "t0_median": 2652.0
@@ -19,16 +19,16 @@
   "granada-bimodal-aerosol": {
     "beam_saturation": null,
     "checks": {
-      "aerosol is present": 0.1415,
-      "second aerosol mode is not drizzle": 5e-5,
+      "aerosol is present": 0.14202,
+      "second aerosol mode is not drizzle": 6e-5,
       "second aerosol mode is not ice": 0.0
     },
     "fractions": {
-      "AEROSOL": 0.1415,
+      "AEROSOL": 0.14202,
       "ATTENUATED": 0.03006,
       "CLEAR": 0.82751,
-      "DRIZZLE_OR_RAIN": 5e-5,
-      "DROPLET": 0.00089,
+      "DRIZZLE_OR_RAIN": 6e-5,
+      "DROPLET": 0.00036,
       "ICE": 0.0,
       "SUPERCOOLED": 0.0
     },
@@ -36,52 +36,52 @@
     "t0_median": 2796.0
   },
   "granada-dust": {
-    "beam_saturation": 0.0253,
+    "beam_saturation": 0.0276,
     "checks": {
-      "aerosol is present": 0.1103,
-      "lofted dust is not drizzle": 0.00161,
-      "lofted dust is not ice": 0.0074
+      "aerosol is present": 0.11032,
+      "lofted dust is not drizzle": 0.00163,
+      "lofted dust is not ice": 0.0079
     },
     "fractions": {
-      "AEROSOL": 0.1103,
+      "AEROSOL": 0.11032,
       "ATTENUATED": 0.35348,
       "CLEAR": 0.52019,
-      "DRIZZLE_OR_RAIN": 0.00161,
-      "DROPLET": 0.0003,
-      "ICE": 0.0074,
-      "SUPERCOOLED": 0.00672
+      "DRIZZLE_OR_RAIN": 0.00163,
+      "DROPLET": 0.00025,
+      "ICE": 0.0079,
+      "SUPERCOOLED": 0.00622
     },
     "strong_beta": 4.18e-6,
-    "t0_median": 3453.8
+    "t0_median": 3453.7
   },
   "juelich-attenuated-rain": {
-    "beam_saturation": 0.0103,
+    "beam_saturation": 0.0105,
     "checks": {
-      "attenuated deep rain columns are drizzle/rain": 0.71831,
-      "daytime boundary-layer aerosol survives": 0.95559
+      "attenuated deep rain columns are drizzle/rain": 0.71904,
+      "daytime boundary-layer aerosol survives": 0.95538
     },
     "fractions": {
-      "AEROSOL": 0.05166,
-      "ATTENUATED": 0.31784,
-      "CLEAR": 0.58817,
-      "DRIZZLE_OR_RAIN": 0.03491,
-      "DROPLET": 0.00265,
-      "ICE": 0.0029,
-      "SUPERCOOLED": 0.00187
+      "AEROSOL": 0.05164,
+      "ATTENUATED": 0.31728,
+      "CLEAR": 0.58873,
+      "DRIZZLE_OR_RAIN": 0.03504,
+      "DROPLET": 0.00253,
+      "ICE": 0.003,
+      "SUPERCOOLED": 0.00178
     },
     "strong_beta": 9.95e-7,
     "t0_median": 3494.2
   },
   "kenttarova-broken-cumulus": {
-    "beam_saturation": 0.0205,
+    "beam_saturation": 0.0195,
     "checks": {
       "morning drizzle shafts are kept whole": 0.79001,
-      "the cloud-free morning boundary layer stays aerosol": 0.39142
+      "the cloud-free morning boundary layer stays aerosol": 0.39138
     },
     "fractions": {
-      "AEROSOL": 0.03365,
-      "ATTENUATED": 0.75609,
-      "CLEAR": 0.13993,
+      "AEROSOL": 0.03364,
+      "ATTENUATED": 0.75579,
+      "CLEAR": 0.14022,
       "DRIZZLE_OR_RAIN": 0.04478,
       "DROPLET": 0.0233,
       "ICE": 0.0002,
@@ -91,33 +91,33 @@
     "t0_median": 2629.9
   },
   "kenttarova-drizzle": {
-    "beam_saturation": 0.031,
+    "beam_saturation": 0.0331,
     "checks": {
       "real sub-cloud drizzle is retained": 0.01527
     },
     "fractions": {
-      "AEROSOL": 0.04249,
-      "ATTENUATED": 0.71881,
-      "CLEAR": 0.18751,
+      "AEROSOL": 0.0425,
+      "ATTENUATED": 0.70457,
+      "CLEAR": 0.20175,
       "DRIZZLE_OR_RAIN": 0.01527,
       "DROPLET": 0.00723,
       "ICE": 0.02194,
       "SUPERCOOLED": 0.00674
     },
     "strong_beta": 1.06e-6,
-    "t0_median": 1338.5
+    "t0_median": 1338.3
   },
   "kenttarova-fog": {
-    "beam_saturation": 0.024,
+    "beam_saturation": 0.0236,
     "checks": {
-      "the fog is a continuous liquid layer": 0.99401
+      "the fog is a continuous liquid layer": 0.99458
     },
     "fractions": {
-      "AEROSOL": 0.03041,
+      "AEROSOL": 0.03032,
       "ATTENUATED": 0.89719,
       "CLEAR": 0.02483,
       "DRIZZLE_OR_RAIN": 0.01518,
-      "DROPLET": 0.03092,
+      "DROPLET": 0.03102,
       "ICE": 0.00037,
       "SUPERCOOLED": 0.0011
     },
@@ -125,235 +125,235 @@
     "t0_median": 2134.2
   },
   "kenttarova-ice-pillar": {
-    "beam_saturation": 0.00323,
+    "beam_saturation": 0.0226,
     "checks": {
       "the boundary layer under the stratus is aerosol, not ice": 0.03925
     },
     "fractions": {
-      "AEROSOL": 0.03377,
-      "ATTENUATED": 0.2372,
-      "CLEAR": 0.72108,
+      "AEROSOL": 0.03396,
+      "ATTENUATED": 0.11622,
+      "CLEAR": 0.84207,
       "DRIZZLE_OR_RAIN": 6e-5,
       "DROPLET": 8e-5,
-      "ICE": 0.00184,
-      "SUPERCOOLED": 0.00596
+      "ICE": 0.00183,
+      "SUPERCOOLED": 0.00578
     },
     "strong_beta": 3.05e-6,
     "t0_median": 5.0
   },
   "kenttarova-low-stratus": {
-    "beam_saturation": 0.0195,
+    "beam_saturation": 0.0205,
     "checks": {
       "no spurious surface fog pillars under the stratus": 0.01937,
       "the low stratus is supercooled liquid": 0.91164
     },
     "fractions": {
-      "AEROSOL": 0.03641,
+      "AEROSOL": 0.03643,
       "ATTENUATED": 0.47712,
       "CLEAR": 0.41964,
-      "DRIZZLE_OR_RAIN": 0.00577,
+      "DRIZZLE_OR_RAIN": 0.00576,
       "DROPLET": 0.00012,
-      "ICE": 0.04732,
+      "ICE": 0.04731,
       "SUPERCOOLED": 0.01362
     },
     "strong_beta": 1.04e-6,
-    "t0_median": 205.8
+    "t0_median": 203.9
   },
   "leipzig-pollyxt": {
-    "beam_saturation": 0.00478,
+    "beam_saturation": 0.0105,
     "checks": {
-      "something is classified": 0.461
+      "something is classified": 0.73477
     },
     "fractions": {
-      "AEROSOL": 0.07646,
-      "ATTENUATED": 0.45109,
-      "CLEAR": 0.461,
+      "AEROSOL": 0.07645,
+      "ATTENUATED": 0.17731,
+      "CLEAR": 0.73477,
       "DRIZZLE_OR_RAIN": 3e-5,
-      "DROPLET": 0.00036,
-      "ICE": 0.00887,
-      "SUPERCOOLED": 0.0022
+      "DROPLET": 0.00034,
+      "ICE": 0.00901,
+      "SUPERCOOLED": 0.00208
     },
     "strong_beta": 1e-5,
-    "t0_median": 1208.6
+    "t0_median": 1208.5
   },
   "lindenberg-da10-cirrus": {
     "beam_saturation": null,
     "checks": {
-      "cirrus base below the -25 degC line is ice, not aerosol": 0.19408,
-      "cold upper cirrus is ice": 0.28108,
-      "the boundary layer is classified (as aerosol)": 0.99567
+      "cirrus base below the -25 degC line is ice, not aerosol": 0.19394,
+      "cold upper cirrus is ice": 0.2811,
+      "the boundary layer is classified (as aerosol)": 0.99574
     },
     "fractions": {
-      "AEROSOL": 0.15495,
+      "AEROSOL": 0.15497,
       "ATTENUATED": 0.10062,
       "CLEAR": 0.6886,
       "DRIZZLE_OR_RAIN": 1e-5,
-      "DROPLET": 0.00058,
-      "ICE": 0.05309,
+      "DROPLET": 0.00057,
+      "ICE": 0.05308,
       "SUPERCOOLED": 0.00215
     },
     "strong_beta": 1e-5,
     "t0_median": 2337.9
   },
   "lindenberg-da10-dial": {
-    "beam_saturation": 0.0219,
+    "beam_saturation": 0.0222,
     "checks": {
-      "evening sub-cloud precipitation is drizzle/rain": 0.18634,
-      "high cirrus aloft is ice": 0.08938,
-      "the boundary layer is classified (as aerosol)": 0.95361
+      "evening sub-cloud precipitation is drizzle/rain": 0.18687,
+      "high cirrus aloft is ice": 0.08915,
+      "the boundary layer is classified (as aerosol)": 0.95283
     },
     "fractions": {
-      "AEROSOL": 0.13507,
-      "ATTENUATED": 0.35372,
-      "CLEAR": 0.47299,
-      "DRIZZLE_OR_RAIN": 0.007,
-      "DROPLET": 0.00212,
-      "ICE": 0.0262,
-      "SUPERCOOLED": 0.00291
+      "AEROSOL": 0.13492,
+      "ATTENUATED": 0.35062,
+      "CLEAR": 0.47609,
+      "DRIZZLE_OR_RAIN": 0.00702,
+      "DROPLET": 0.00224,
+      "ICE": 0.02623,
+      "SUPERCOOLED": 0.00289
     },
     "strong_beta": 1.63e-6,
     "t0_median": 2667.5
   },
   "lindenberg-ice-flood": {
-    "beam_saturation": 0.0295,
+    "beam_saturation": 0.0301,
     "checks": {
       "no drizzle high inside the ice cloud (well above t0)": 0.0,
       "no fake ice column in the warm boundary layer": 0.0
     },
     "fractions": {
-      "AEROSOL": 0.09026,
-      "ATTENUATED": 0.47655,
-      "CLEAR": 0.38556,
-      "DRIZZLE_OR_RAIN": 0.00132,
-      "DROPLET": 0.00063,
-      "ICE": 0.03788,
-      "SUPERCOOLED": 0.00779
+      "AEROSOL": 0.09032,
+      "ATTENUATED": 0.46976,
+      "CLEAR": 0.39235,
+      "DRIZZLE_OR_RAIN": 0.00133,
+      "DROPLET": 0.00062,
+      "ICE": 0.0382,
+      "SUPERCOOLED": 0.00743
     },
     "strong_beta": 4.99e-6,
-    "t0_median": 1063.1
+    "t0_median": 1063.0
   },
   "lindenberg-melting-above-t0": {
-    "beam_saturation": 0.0351,
+    "beam_saturation": 0.0353,
     "checks": {
-      "ice no longer floods the band down to the model t0": 0.37725,
-      "the melt band below the ice base is drizzle/rain": 0.23257
+      "ice no longer floods the band down to the model t0": 0.37717,
+      "the melt band below the ice base is drizzle/rain": 0.23267
     },
     "fractions": {
-      "AEROSOL": 0.09899,
-      "ATTENUATED": 0.67169,
-      "CLEAR": 0.19478,
-      "DRIZZLE_OR_RAIN": 0.01327,
-      "DROPLET": 0.0066,
+      "AEROSOL": 0.09882,
+      "ATTENUATED": 0.66329,
+      "CLEAR": 0.20318,
+      "DRIZZLE_OR_RAIN": 0.01343,
+      "DROPLET": 0.00659,
       "ICE": 0.00942,
-      "SUPERCOOLED": 0.00525
+      "SUPERCOOLED": 0.00526
     },
     "strong_beta": 4.44e-6,
-    "t0_median": 2109.1
+    "t0_median": 2109.0
   },
   "macehead-melting-level": {
-    "beam_saturation": 0.0208,
+    "beam_saturation": 0.0191,
     "checks": {
-      "liquid clouds are detected": 0.01393,
+      "liquid clouds are detected": 0.01458,
       "no spurious ice below the melting level": 0.0
     },
     "fractions": {
-      "AEROSOL": 0.03932,
-      "ATTENUATED": 0.84773,
-      "CLEAR": 0.09575,
-      "DRIZZLE_OR_RAIN": 0.00326,
-      "DROPLET": 0.01393,
+      "AEROSOL": 0.03834,
+      "ATTENUATED": 0.8428,
+      "CLEAR": 0.10069,
+      "DRIZZLE_OR_RAIN": 0.00359,
+      "DROPLET": 0.01458,
       "ICE": 0.0,
       "SUPERCOOLED": 0.0
     },
     "strong_beta": 1e-5,
-    "t0_median": 2895.8
+    "t0_median": 2889.4
   },
   "mindelo-marine-haze": {
-    "beam_saturation": 0.024,
+    "beam_saturation": 0.0249,
     "checks": {
-      "marine haze is not drizzle": 0.07942,
-      "the surface layer is classified (as aerosol)": 0.8735
+      "marine haze is not drizzle": 0.07976,
+      "the surface layer is classified (as aerosol)": 0.87461
     },
     "fractions": {
-      "AEROSOL": 0.13053,
-      "ATTENUATED": 0.10293,
-      "CLEAR": 0.7578,
-      "DRIZZLE_OR_RAIN": 0.00504,
-      "DROPLET": 0.00197,
-      "ICE": 0.00024,
-      "SUPERCOOLED": 0.00149
+      "AEROSOL": 0.1306,
+      "ATTENUATED": 0.10164,
+      "CLEAR": 0.75909,
+      "DRIZZLE_OR_RAIN": 0.00507,
+      "DROPLET": 0.00187,
+      "ICE": 0.00025,
+      "SUPERCOOLED": 0.00148
     },
     "strong_beta": 2.23e-6,
     "t0_median": 4230.3
   },
   "mindelo-pollyxt": {
-    "beam_saturation": 0.00985,
+    "beam_saturation": 0.00906,
     "checks": {
-      "marine haze is not drizzle": 0.00387,
-      "the haze layer is classified (as aerosol)": 0.76503
+      "marine haze is not drizzle": 0.00466,
+      "the haze layer is classified (as aerosol)": 0.76522
     },
     "fractions": {
-      "AEROSOL": 0.09314,
-      "ATTENUATED": 0.18059,
-      "CLEAR": 0.72383,
-      "DRIZZLE_OR_RAIN": 0.00045,
-      "DROPLET": 0.00124,
-      "ICE": 0.00017,
-      "SUPERCOOLED": 0.00058
+      "AEROSOL": 0.09317,
+      "ATTENUATED": 0.18884,
+      "CLEAR": 0.71558,
+      "DRIZZLE_OR_RAIN": 0.00054,
+      "DROPLET": 0.00112,
+      "ICE": 0.00024,
+      "SUPERCOOLED": 0.0005
     },
     "strong_beta": 6.54e-6,
     "t0_median": 4191.9
   },
   "nyalesund-cloudy-arctic": {
-    "beam_saturation": 0.0263,
+    "beam_saturation": 0.0266,
     "checks": {
-      "liquid clouds are detected": 0.01385,
-      "sub-cloud drizzle is detected": 0.01779
+      "liquid clouds are detected": 0.01501,
+      "sub-cloud drizzle is detected": 0.01826
     },
     "fractions": {
-      "AEROSOL": 0.01942,
-      "ATTENUATED": 0.93428,
-      "CLEAR": 0.00948,
-      "DRIZZLE_OR_RAIN": 0.01779,
-      "DROPLET": 0.01385,
-      "ICE": 0.00192,
-      "SUPERCOOLED": 0.00326
+      "AEROSOL": 0.01758,
+      "ATTENUATED": 0.92895,
+      "CLEAR": 0.01481,
+      "DRIZZLE_OR_RAIN": 0.01826,
+      "DROPLET": 0.01501,
+      "ICE": 0.00173,
+      "SUPERCOOLED": 0.00366
     },
     "strong_beta": 1e-5,
-    "t0_median": 1056.2
+    "t0_median": 1055.9
   },
   "payerne-melting-level": {
-    "beam_saturation": 0.0281,
+    "beam_saturation": 0.0277,
     "checks": {
       "ice between observed melt and model t0 is ice, not drizzle": 0.66983,
-      "rain below the observed melt stays drizzle/rain": 0.88409
+      "rain below the observed melt stays drizzle/rain": 0.88486
     },
     "fractions": {
-      "AEROSOL": 0.10064,
-      "ATTENUATED": 0.41462,
-      "CLEAR": 0.41245,
-      "DRIZZLE_OR_RAIN": 0.05506,
-      "DROPLET": 0.00298,
-      "ICE": 0.01313,
-      "SUPERCOOLED": 0.00112
+      "AEROSOL": 0.10053,
+      "ATTENUATED": 0.41433,
+      "CLEAR": 0.41274,
+      "DRIZZLE_OR_RAIN": 0.05515,
+      "DROPLET": 0.003,
+      "ICE": 0.01314,
+      "SUPERCOOLED": 0.00111
     },
     "strong_beta": 1.65e-6,
-    "t0_median": 4086.7
+    "t0_median": 4086.4
   },
   "troll-polar-ice": {
-    "beam_saturation": 0.0295,
+    "beam_saturation": 0.0298,
     "checks": {
-      "ice-dominated column": 0.06429,
-      "supercooled liquid present": 0.01136
+      "ice-dominated column": 0.06443,
+      "supercooled liquid present": 0.01065
     },
     "fractions": {
-      "AEROSOL": 0.02315,
-      "ATTENUATED": 0.66241,
-      "CLEAR": 0.2384,
-      "DRIZZLE_OR_RAIN": 0.00033,
-      "DROPLET": 6e-5,
-      "ICE": 0.06429,
-      "SUPERCOOLED": 0.01136
+      "AEROSOL": 0.02376,
+      "ATTENUATED": 0.63386,
+      "CLEAR": 0.26696,
+      "DRIZZLE_OR_RAIN": 0.00029,
+      "DROPLET": 5e-5,
+      "ICE": 0.06443,
+      "SUPERCOOLED": 0.01065
     },
     "strong_beta": 1.17e-6,
     "t0_median": 2.4

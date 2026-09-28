@@ -423,6 +423,22 @@ def test_find_attenuated_liquid_in_top_run_marks_void_above():
     assert att[0, 14:].all() and not att[0, :14].any()
 
 
+def test_find_attenuated_liquid_speck_needs_saturated_integral():
+    # With a saturation plateau available, the integral decides for
+    # liquid-topped profiles: a liquid speck inside an aerosol column, whose
+    # integral is nowhere near the plateau, does not attenuate the void above.
+    target = _column((2, 20, Target.AEROSOL))
+    target[0, 16] = Target.DROPLET  # 300 m below the run top
+    bright = np.zeros_like(target, dtype=bool)
+    integral = np.full(target.shape, 0.002)  # a few percent of the plateau
+    assert _find_attenuated(target, bright, _H).any()  # no plateau: liquid rule
+    att = _find_attenuated(target, bright, _H, integral=integral, saturation=0.03)
+    assert not att.any()
+    integral[0, 16:] = 0.025  # a real stratus: at the plateau, so attenuated
+    att = _find_attenuated(target, bright, _H, integral=integral, saturation=0.03)
+    assert att[0, 20:].all()
+
+
 def test_find_attenuated_liquid_far_below_top_is_not_used():
     # A surface-pass liquid speck under 2 km of aerosol: the beam evidently went
     # on through it, so neither rule 1 nor the saturation population use it.
@@ -522,7 +538,7 @@ def test_find_attenuated_saturated_integral_marks_void():
     ).any()
 
 
-def test_beam_saturation_is_median_of_liquid_tops():
+def test_beam_saturation_is_where_liquid_tops_pile_up():
     rng = np.random.default_rng(0)
     n = 300
     target = np.full((n, 30), Target.CLEAR, dtype=int)
@@ -537,6 +553,24 @@ def test_beam_saturation_is_median_of_liquid_tops():
     assert sat is not None and abs(sat - 0.03) < 0.002
     # Too few liquid-topped profiles -> no estimate.
     assert _beam_saturation(signal[:150], liquid[:150], integral[:150], _H) is None
+
+
+def test_beam_saturation_ignores_thin_layer_majority():
+    # A winter day: most liquid-topped profiles are thin ice-fog layers whose
+    # integrals spread an order of magnitude below the plateau, and a minority
+    # of real stratus profiles form a sharp spike at it. The plateau is the
+    # spike, not the median (which would land among the thin layers).
+    rng = np.random.default_rng(1)
+    n = 700
+    target = np.full((n, 30), Target.CLEAR, dtype=int)
+    target[:, 5:12] = Target.AEROSOL
+    target[:, 12:16] = Target.DROPLET  # every profile liquid-topped, top at 15
+    integral = np.zeros((n, 30))
+    integral[:450, 15:] = rng.lognormal(np.log(0.002), 0.6, (450, 1))  # thin
+    integral[450:, 15:] = rng.normal(0.02, 0.001, (250, 1))  # saturated
+    signal, liquid = target != Target.CLEAR, target == Target.DROPLET
+    sat = _beam_saturation(signal, liquid, integral, _H)
+    assert sat is not None and abs(sat - 0.02) < 0.002
 
 
 def test_find_attenuated_empty_and_full_profiles():

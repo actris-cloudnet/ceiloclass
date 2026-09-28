@@ -123,6 +123,19 @@ consecutive aerosol gates are within `GROW_RATIO` of each other, but only
 `_grow_spent_tails` follow the tail while stopping within a gate or two of
 entering a genuine aerosol layer above it."""
 
+LIQUID_SATURATION_FRACTION = 0.33
+"""Fraction of the plateau a liquid-topped profile's integral needs to count as
+extinguished.
+
+A liquid layer in the topmost run is evidence of extinction only if the layer
+is substantial. Thin, non-saturating liquid -- a few gates of ice fog or a
+supercooled speck found inside an aerosol column -- leaves the integral at a
+few percent of the plateau, while a genuine stratus deck reaches it (thin
+parts of a deck run at 0.35-0.7 of it, e.g. Ny-Alesund). A third of the beam
+gone inside a detected liquid layer separates the two populations, and is
+deliberately looser than `SATURATION_FRACTION`, which applies with no liquid
+detected at all."""
+
 MIN_SATURATION_PROFILES = 200
 """Liquid-topped profiles needed to estimate the saturation integral per file.
 
@@ -923,24 +936,49 @@ def _beam_saturation(
     height: npt.NDArray[np.floating],
     *,
     min_profiles: int = MIN_SATURATION_PROFILES,
+    bins_per_decade: int = 8,
 ) -> float | None:
     """Estimate the saturated backscatter integral from this file's liquid tops.
 
     Profiles whose signal ends just above a liquid layer (see `_liquid_topped`)
     are, as a population, beams extinguished in liquid: their top-of-run
     integrals pile up at the instrument's saturation plateau I_sat = 1/(2 eta S)
-    (the O'Connor et al. 2004 calibration principle). The median of that
-    population is the plateau in the file's own calibration units -- a thin
-    cumulus pulls below it and a rain column above it, but the bulk sits on the
-    plateau. Returns None with fewer than `min_profiles` such profiles, when the
-    estimate would be unreliable (see `MIN_SATURATION_PROFILES`).
+    (the O'Connor et al. 2004 calibration principle). The plateau is where
+    they pile up -- the tallest mode of their log-histogram, in the file's own
+    calibration units. Not the median: on a winter day whose liquid-topped
+    profiles are mostly thin, non-saturating ice-fog layers the median lands
+    among those, an order of magnitude below the sharp spike that the day's
+    real stratus profiles still form at the plateau (Kenttarova 2024-02-11:
+    median 0.003, spike 0.02). Thin cumuli spread below the spike and rain
+    columns tail above it without forming a mode of their own. Returns None
+    with fewer than `min_profiles` such profiles, when the estimate would be
+    unreliable (see `MIN_SATURATION_PROFILES`).
     """
     has, top, in_run = _topmost_runs(signal)
     liquid_topped = has & _liquid_topped(liquid, top, in_run, height)
     if liquid_topped.sum() < min_profiles:
         return None
     rows = np.arange(signal.shape[0])
-    return float(np.median(integral[rows, top][liquid_topped]))
+    values = integral[rows, top][liquid_topped]
+    values = values[values > 0]
+    if values.size < min_profiles:
+        return None
+    log_values = np.log10(values)
+    edges = (
+        np.arange(
+            np.floor(log_values.min() * bins_per_decade),
+            np.ceil(log_values.max() * bins_per_decade) + 2,
+        )
+        / bins_per_decade
+    )
+    counts, _ = np.histogram(log_values, bins=edges)
+    # No smoothing: the pile-up is narrow by nature (the integral is capped
+    # there) and smoothing would dilute it against a broad thin-cloud mode.
+    peak = int(np.argmax(counts))
+    # The plateau value itself: the median of the samples in and around the
+    # winning bin, rather than the bin centre.
+    lo, hi = edges[max(peak - 1, 0)], edges[min(peak + 2, len(edges) - 1)]
+    return float(np.median(values[(log_values >= lo) & (log_values < hi)]))
 
 
 def _grow_spent_tails(
@@ -1002,6 +1040,7 @@ def _find_attenuated(
     integral: npt.NDArray[np.floating] | None = None,
     saturation: float | None = None,
     saturation_fraction: float = SATURATION_FRACTION,
+    liquid_saturation_fraction: float = LIQUID_SATURATION_FRACTION,
 ) -> npt.NDArray[np.bool_]:
     """Mark the void above each profile's signal top where the beam was extinguished.
 
@@ -1012,8 +1051,20 @@ def _find_attenuated(
     signal higher up proves the beam got through. The run extinguishes the beam
     when any of these hold:
 
+    - with `integral` and `saturation` given, the backscatter **integral** at its
+      top has reached `saturation_fraction` of the saturation plateau, i.e. that
+      fraction of the beam is demonstrably lost (see `SATURATION_FRACTION`). This
+      is the physical criterion: it catches extinguished columns where no liquid
+      peak was detected (a polar low-cloud continuum, broken-cumulus edges);
     - it ends within `LIQUID_EXTINCTION_GAP` of a **liquid** layer (droplet or
-      supercooled): a liquid cloud of even modest water path is optically thick
+      supercooled) and, when a plateau is available, its integral has reached
+      the looser `liquid_saturation_fraction` of it (see
+      `LIQUID_SATURATION_FRACTION`): a liquid cloud of even modest water path
+      is optically thick enough to kill a lidar beam, but a single liquid speck
+      found inside an aerosol column has an integral near zero and must not
+      turn the whole column above it into "attenuated". Without a plateau (too
+      few liquid-topped profiles to estimate one) the liquid layer alone
+      counts, since a liquid cloud of even modest water path is optically thick
       enough (tau ~ 3) to kill a lidar beam, and `find_liquid` keys on the
       peak-then-sharp-decay signature that is this very attenuation. A liquid
       layer with signal running on well above it -- a separate higher run, or
@@ -1026,12 +1077,7 @@ def _find_attenuated(
       one gate below) its top, e.g. a thick ice/snow column. Aerosol fades
       gradually below the threshold before masking, so the void above an aerosol
       layer stays clear (bright-but-unsourced aerosol such as marine haze is
-      excluded by requiring a hydrometeor class); likewise faint cirrus;
-    - with `integral` and `saturation` given, the backscatter **integral** at its
-      top has reached `saturation_fraction` of the saturation plateau, i.e. that
-      fraction of the beam is demonstrably lost (see `SATURATION_FRACTION`). This
-      is the physical criterion; it catches extinguished columns where no liquid
-      peak was detected (a polar low-cloud continuum, broken-cumulus edges).
+      excluded by requiring a hydrometeor class); likewise faint cirrus.
 
     Works on the despeckled `target` so screening noise in the void neither
     defines the signal top nor counts as signal above a cloud.
@@ -1049,13 +1095,14 @@ def _find_attenuated(
     rain_topped = (highest_hyd >= 0) & (
         target[rows, highest_hyd] == Target.DRIZZLE_OR_RAIN
     )
-    extinguished = (
-        _liquid_topped(liquid, top, in_run, height)
-        | rain_topped
-        | _at_top(bright & hydrometeor, top)
-    )
+    extinguished = rain_topped | _at_top(bright & hydrometeor, top)
+    liquid_topped = _liquid_topped(liquid, top, in_run, height)
     if integral is not None and saturation is not None:
-        extinguished |= integral[rows, top] >= saturation_fraction * saturation
+        ratio = integral[rows, top] / saturation
+        extinguished |= ratio >= saturation_fraction
+        extinguished |= liquid_topped & (ratio >= liquid_saturation_fraction)
+    else:
+        extinguished |= liquid_topped
     return (has & extinguished)[:, np.newaxis] & (idx > top[:, np.newaxis])
 
 
