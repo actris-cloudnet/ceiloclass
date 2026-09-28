@@ -65,13 +65,13 @@ layer's own top gate, which a single-gate break in the decay would put right
 above the peak.
 """
 
-GROW_TOLERANCE = 0.1
-"""Relative rise a gate may show over its neighbour and still count as decaying.
+GROW_RATIO = 1.1
+"""Largest gate-to-neighbour backscatter ratio still counted as decaying.
 
 `grow_liquid` extends a layer only through gates no brighter than the one they
 grow from, i.e. along the layer's own attenuating flank, so a plateau or a
 rise into another target stops it and the growth distances are outer caps
-rather than a fixed extension every layer receives. The tolerance keeps
+rather than a fixed extension every layer receives. The 10% slack keeps
 single-gate noise on a smoothly decaying flank from truncating the growth at
 random heights."""
 
@@ -280,7 +280,7 @@ def grow_liquid(
     grow_up: float = 100.0,
     grow_down: float = 10.0,
     beta: ma.MaskedArray | None = None,
-    tolerance: float = GROW_TOLERANCE,
+    ratio: float = GROW_RATIO,
     min_frac: float = GROW_MIN_FRAC,
 ) -> npt.NDArray[np.bool_]:
     """Extend liquid layers into the adjacent signal halo (cloud edges).
@@ -299,9 +299,9 @@ def grow_liquid(
     so grow downward only a little, to avoid absorbing it as liquid.
 
     With `beta` given the growth also follows the data: a gate joins only when
-    it is no brighter (within `tolerance`) than the gate it grows from, i.e. the
-    layer extends along its own decaying flank and stops where the signal
-    flattens or rises again (see `GROW_TOLERANCE`), and never below `min_frac`
+    it is at most `ratio` times the gate it grows from, i.e. the layer extends
+    along its own decaying flank and stops where the signal flattens or rises
+    again (see `GROW_RATIO`), and never below `min_frac`
     of the profile's liquid peak (see `GROW_MIN_FRAC`). Without `beta` the
     distances alone bound it.
 
@@ -313,7 +313,7 @@ def grow_liquid(
         grow_up: Maximum distance to grow toward cloud top (m).
         grow_down: Maximum distance to grow toward cloud base (m).
         beta: Screened backscatter (sr-1 m-1), to keep the growth on the flank.
-        tolerance: Relative rise over the source gate still counted as decaying.
+        ratio: Largest ratio to the source gate still counted as decaying.
         min_frac: Fraction of the profile's liquid peak below which growth stops.
 
     Returns:
@@ -325,8 +325,8 @@ def grow_liquid(
         values = ma.filled(beta, 0.0)
         floor = min_frac * np.where(droplet, values, 0.0).max(axis=1)[:, np.newaxis]
         allowed = allowed & (values >= floor)
-        up = allowed & _flank_mask(values, 1 + tolerance, up=True)
-        down = allowed & _flank_mask(values, 1 + tolerance, up=False)
+        up = allowed & _flank_mask(values, ratio, up=True)
+        down = allowed & _flank_mask(values, ratio, up=False)
     out = _grow_range(droplet, up, _n_elements(height, grow_up), up=True)
     return _grow_range(out, down, _n_elements(height, grow_down), up=False)
 

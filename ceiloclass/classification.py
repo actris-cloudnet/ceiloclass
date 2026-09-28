@@ -25,7 +25,6 @@ from .detection import (
     ICE_DEPOL_LIMIT,
     _fill_runs,
     _find_t0_alt,
-    _flank_mask,
     _grow_range,
     _iter_runs,
     _n_elements,
@@ -113,24 +112,15 @@ the beam went on, and such a profile is neither attenuated by that liquid nor a
 sample of the saturation plateau."""
 
 TAIL_DECAY = 0.8
-"""Largest gate-to-gate ratio still counted as a liquid layer's dying tail.
+"""Largest gate-to-gate ratio still counted as a spent layer's dying tail.
 
 Above a liquid layer that has spent the beam the signal falls off
 exponentially, halving every gate or two, until it meets the noise floor.
 Aerosol decreases only gently with height (on the regression days 86-100% of
-consecutive aerosol gates are within 10% of each other), so requiring a real
-drop per gate lets `_liquid_tail` follow the tail while stopping within a
-gate or two of entering a genuine aerosol layer above it."""
-
-TAIL_RECOVERY = 2.0
-"""Factor by which signal above a dying tail may exceed the tail's end level.
-
-Once a spent layer's tail has decayed to the noise floor, a few floor-level
-gates often remain before the signal is masked, fluctuating within a factor of
-two; they must not veto the tail. A brighter layer above (aerosol or ice
-resolved through a beam that was not spent after all) does veto it, so
-`_liquid_tail` never labels the surroundings of a layer sitting inside a
-deeper column as liquid."""
+consecutive aerosol gates are within `GROW_RATIO` of each other, but only
+4-74% within this ratio), so requiring a real drop per gate lets
+`_grow_spent_tails` follow the tail while stopping within a gate or two of
+entering a genuine aerosol layer above it."""
 
 MIN_SATURATION_PROFILES = 200
 """Liquid-topped profiles needed to estimate the saturation integral per file.
@@ -305,6 +295,17 @@ def classify(
         blocked = ice_like
     droplet = fill_thin_clouds(droplet, ~beta_mask, blocked, height)
     droplet = grow_liquid(droplet, ~beta_mask, blocked, height, beta=beta)
+    # The saturation plateau is estimated from the profiles whose signal ends
+    # just above a liquid layer; the same despeckled signal defines the runs
+    # that _find_attenuated works on later.
+    integral = _beta_integral(beta, height)
+    clean = _despeckle(signal.astype(int), speckle_min).astype(bool)
+    if beam_saturation == "auto":
+        beam_saturation = _beam_saturation(clean, droplet, integral, height)
+    if beam_saturation is not None:
+        droplet = _grow_spent_tails(
+            droplet, clean, blocked, height, beta, integral, beam_saturation
+        )
     droplet = correct_supercooled(droplet, tw)
 
     if ice_like is not None:
@@ -385,16 +386,6 @@ def classify(
 
     target = _assemble(droplet, cold, ice, rain, aerosol)
     target = _despeckle(target, speckle_min)
-    integral = _beta_integral(beta, height)
-    if beam_saturation == "auto":
-        beam_saturation = _beam_saturation(target, integral, height)
-    if beam_saturation is not None:
-        # The dying tail above a liquid layer that spent the beam is still that
-        # cloud (see _liquid_tail); label it with the layer's liquid class, as
-        # _assemble would.
-        tail = _liquid_tail(target, ma.filled(beta, 0.0), integral, beam_saturation)
-        target[tail] = np.where(cold[tail], Target.SUPERCOOLED, Target.DROPLET)
-        droplet, ice, aerosol = droplet | tail, ice & ~tail, aerosol & ~tail
     attenuated = _find_attenuated(
         target, bright, height, integral=integral, saturation=beam_saturation
     )
@@ -911,15 +902,14 @@ def _beta_integral(
 
 
 def _topmost_runs(
-    target: npt.NDArray[np.integer],
+    signal: npt.NDArray[np.bool_],
 ) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.intp], npt.NDArray[np.bool_]]:
     """Per profile: has-signal flag, highest signal gate, and the run ending there.
 
-    The run is the contiguous block of classified gates ending at the top gate.
+    The run is the contiguous block of `signal` gates ending at the top gate.
     """
-    signal = target != Target.CLEAR
     has, top = _signal_top(signal)
-    idx = np.arange(target.shape[1])[np.newaxis, :]
+    idx = np.arange(signal.shape[1])[np.newaxis, :]
     # Base of the run: one above the highest clear gate below the top (or the
     # bottom of the profile).
     base = _highest(~signal & (idx <= top[:, np.newaxis])) + 1
@@ -928,26 +918,20 @@ def _topmost_runs(
 
 
 def _liquid_topped(
-    target: npt.NDArray[np.integer],
+    liquid: npt.NDArray[np.bool_],
     top: npt.NDArray[np.intp],
     in_run: npt.NDArray[np.bool_],
     height: npt.NDArray[np.floating],
     max_gap: float = LIQUID_EXTINCTION_GAP,
 ) -> npt.NDArray[np.bool_]:
     """Profiles whose topmost run holds liquid within `max_gap` metres of its top."""
-    highest = _highest_liquid(target, in_run)
+    highest = _highest(in_run & liquid)
     return (highest >= 0) & (height[top] - height[highest] <= max_gap)
 
 
-def _highest_liquid(
-    target: npt.NDArray[np.integer], in_run: npt.NDArray[np.bool_]
-) -> npt.NDArray[np.intp]:
-    """Per profile: the highest liquid gate of the topmost run, or -1."""
-    return _highest(in_run & np.isin(target, [Target.DROPLET, Target.SUPERCOOLED]))
-
-
 def _beam_saturation(
-    target: npt.NDArray[np.integer],
+    signal: npt.NDArray[np.bool_],
+    liquid: npt.NDArray[np.bool_],
     integral: npt.NDArray[np.floating],
     height: npt.NDArray[np.floating],
     *,
@@ -964,12 +948,63 @@ def _beam_saturation(
     plateau. Returns None with fewer than `min_profiles` such profiles, when the
     estimate would be unreliable (see `MIN_SATURATION_PROFILES`).
     """
-    has, top, in_run = _topmost_runs(target)
-    liquid_topped = has & _liquid_topped(target, top, in_run, height)
+    has, top, in_run = _topmost_runs(signal)
+    liquid_topped = has & _liquid_topped(liquid, top, in_run, height)
     if liquid_topped.sum() < min_profiles:
         return None
-    rows = np.arange(target.shape[0])
+    rows = np.arange(signal.shape[0])
     return float(np.median(integral[rows, top][liquid_topped]))
+
+
+def _grow_spent_tails(
+    droplet: npt.NDArray[np.bool_],
+    signal: npt.NDArray[np.bool_],
+    blocked: npt.NDArray[np.bool_],
+    height: npt.NDArray[np.floating],
+    beta: ma.MaskedArray,
+    integral: npt.NDArray[np.floating],
+    saturation: float,
+    *,
+    saturation_fraction: float = SATURATION_FRACTION,
+    tail_decay: float = TAIL_DECAY,
+) -> npt.NDArray[np.bool_]:
+    """Grow liquid layers that spent the beam to the end of their decaying signal.
+
+    `grow_liquid` stops at a fraction of the layer's peak (`GROW_MIN_FRAC`),
+    which is right for a layer the beam passes through: the faint signal above
+    it is whatever lies beyond. A layer whose backscatter integral has reached
+    `saturation_fraction` of the saturation plateau extinguished the beam inside
+    itself, so the signal still falling away above it is the cloud's own dying
+    tail and the true top lies above the last signal. Such layers are regrown
+    from the highest liquid gate of the profile's topmost signal run along the
+    decaying flank alone -- no floor, no distance cap -- through gates that
+    keep falling steeply (`tail_decay`, see `TAIL_DECAY`) and are not
+    `blocked`. Gently decreasing or rising signal is a target of its own, so a
+    layer sitting inside a deeper aerosol or ice column never has its
+    surroundings turned into liquid; a thin layer the beam passes through is
+    not spent and is left alone.
+    """
+    n_time, n_gate = droplet.shape
+    _, _, in_run = _topmost_runs(signal)
+    highest = _highest(in_run & droplet)
+    rows = np.arange(n_time)
+    spent = (highest >= 0) & (
+        integral[rows, highest] >= saturation_fraction * saturation
+    )
+    idx = np.arange(n_gate)[np.newaxis, :]
+    seed = spent[:, np.newaxis] & (idx == highest[:, np.newaxis])
+    tail = grow_liquid(
+        seed,
+        signal & in_run,
+        blocked,
+        height,
+        grow_up=float(height[-1] - height[0]),
+        grow_down=0.0,
+        beta=beta,
+        ratio=tail_decay,
+        min_frac=0.0,
+    )
+    return droplet | tail
 
 
 def _find_attenuated(
@@ -1015,9 +1050,10 @@ def _find_attenuated(
     defines the signal top nor counts as signal above a cloud.
     """
     n_time, n_gate = target.shape
-    has, top, in_run = _topmost_runs(target)
+    has, top, in_run = _topmost_runs(target != Target.CLEAR)
     idx = np.arange(n_gate)[np.newaxis, :]
     rows = np.arange(n_time)
+    liquid = np.isin(target, [Target.DROPLET, Target.SUPERCOOLED])
     hydrometeor = np.isin(
         target,
         [Target.DROPLET, Target.SUPERCOOLED, Target.ICE, Target.DRIZZLE_OR_RAIN],
@@ -1027,65 +1063,13 @@ def _find_attenuated(
         target[rows, highest_hyd] == Target.DRIZZLE_OR_RAIN
     )
     extinguished = (
-        _liquid_topped(target, top, in_run, height)
+        _liquid_topped(liquid, top, in_run, height)
         | rain_topped
         | _at_top(bright & hydrometeor, top)
     )
     if integral is not None and saturation is not None:
         extinguished |= integral[rows, top] >= saturation_fraction * saturation
     return (has & extinguished)[:, np.newaxis] & (idx > top[:, np.newaxis])
-
-
-def _liquid_tail(
-    target: npt.NDArray[np.integer],
-    values: npt.NDArray[np.floating],
-    integral: npt.NDArray[np.floating],
-    saturation: float,
-    *,
-    saturation_fraction: float = SATURATION_FRACTION,
-    tail_decay: float = TAIL_DECAY,
-    tail_recovery: float = TAIL_RECOVERY,
-) -> npt.NDArray[np.bool_]:
-    """Mark the dying tail above a liquid layer that has spent the beam.
-
-    `grow_liquid` stops at a fraction of the layer's peak, so the last gates of
-    the signal above a cloud top -- still falling steeply as the beam dies
-    inside the cloud -- fall through to ice or aerosol and leave a thin rim on
-    an otherwise solid layer. Those gates are inside the cloud: the true top
-    lies above the last signal. They are relabelled liquid when the layer
-    evidently extinguished the beam, on three conditions:
-
-    - the backscatter integral at the layer's top has reached
-      `saturation_fraction` of the saturation plateau (the beam is spent);
-    - each tail gate falls to at most `tail_decay` of the one below it (see
-      `TAIL_DECAY`);
-    - the signal never recovers above the tail (see `TAIL_RECOVERY`).
-
-    `values` is the unmasked backscatter. Only the topmost signal run of each
-    profile is considered.
-    """
-    n_gate = target.shape[1]
-    _, _, in_run = _topmost_runs(target)
-    idx = np.arange(n_gate)[np.newaxis, :]
-    rows = np.arange(target.shape[0])
-    highest = _highest_liquid(target, in_run)
-    spent = (highest >= 0) & (
-        integral[rows, highest] >= saturation_fraction * saturation
-    )
-    allowed = (
-        in_run
-        & np.isin(target, [Target.AEROSOL, Target.ICE])
-        & _flank_mask(values, tail_decay, up=True)
-    )
-    # The tail is the contiguous allowed run just above the liquid: everything
-    # from the gate above the liquid up to the first gate that is not allowed.
-    above_liquid = idx > highest[:, np.newaxis]
-    first_stop = np.where(above_liquid & ~allowed, idx, n_gate).min(axis=1)
-    tail = spent[:, np.newaxis] & above_liquid & (idx < first_stop[:, np.newaxis])
-    tail_top = _highest(tail)
-    rest = np.where(in_run & (idx > tail_top[:, np.newaxis]), values, 0.0)
-    recovers = rest.max(axis=1) > tail_recovery * values[rows, tail_top]
-    return tail & ~recovers[:, np.newaxis]
 
 
 def _despeckle(

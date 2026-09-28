@@ -15,7 +15,7 @@ from ceiloclass.classification import (
     _extend_ice_to_cloud_base,
     _find_attenuated,
     _flood_connected,
-    _liquid_tail,
+    _grow_spent_tails,
     _melt_band_below_ice,
     _source_connected,
     _thin_runs,
@@ -472,44 +472,32 @@ def test_find_attenuated_bright_aerosol_top_stays_clear():
     assert not _find_attenuated(target, bright, _H).any()
 
 
-def test_liquid_tail_relabels_dying_signal_above_spent_layer():
-    # Signal falling steeply above a liquid layer whose integral has reached
-    # saturation, up to where the signal ends, is the layer's dying tail and
-    # becomes liquid whether it was classified as ice or aerosol.
-    target = _column(
-        (2, 6, Target.AEROSOL), (6, 10, Target.DROPLET), (10, 12, Target.ICE)
-    )
-    target[0, 12] = Target.AEROSOL
-    beta = np.zeros(target.shape)
+def test_grow_spent_tails_follows_decay_to_the_end_of_signal():
+    # A liquid layer whose integral has reached saturation extinguished the
+    # beam: it grows along its decaying tail past the 5 % floor, right up to
+    # the first gate that rises (a brighter target above stays untouched). A
+    # layer the beam passes through (low integral) is left as grown.
+    n_gate = 30
+    height = np.arange(n_gate) * 100.0
+    beta = np.zeros((1, n_gate))
     beta[0, 2:6] = 1e-6
     beta[0, 6:10] = [1e-4, 3e-4, 2e-4, 1e-4]
-    beta[0, 10:13] = [3e-5, 1e-5, 2e-6]  # decaying tail, then nothing
-    integral = np.cumsum(beta * 100.0, axis=1)  # saturated: 0.07 at the top
-    tail = _liquid_tail(target, beta, integral, 0.03)
-    assert tail[0, 10:13].all() and not tail[0, 13:].any() and not tail[0, :10].any()
-    # A layer the beam passes through (low integral): nothing is relabelled.
-    assert not _liquid_tail(target, beta, integral * 0.1, 0.03).any()
-
-
-def test_liquid_tail_keeps_layer_with_brighter_signal_above():
-    # A liquid layer inside a deeper column -- signal brighter than the tail's
-    # end continues above it -- has not demonstrably extinguished the beam: its
-    # surroundings are not turned into liquid. Floor-level remnants (within a
-    # factor of two of where the tail ended) do not veto it.
-    target = _column(
-        (2, 6, Target.AEROSOL), (6, 10, Target.DROPLET), (10, 16, Target.AEROSOL)
+    beta[0, 10:14] = [3e-5, 1e-5, 2e-6, 5e-7]  # decaying tail
+    beta[0, 14:17] = [3e-6, 4e-6, 4e-6]  # a brighter aerosol layer above it
+    signal = beta > 0
+    droplet = np.zeros_like(signal)
+    droplet[0, 6:10] = True
+    blocked = np.zeros_like(signal)
+    integral = np.cumsum(beta * 100.0, axis=1)  # 0.07 at the liquid top
+    out = _grow_spent_tails(
+        droplet, signal, blocked, height, ma.array(beta), integral, 0.03
     )
-    beta = np.zeros(target.shape)
-    beta[0, 2:6] = 1e-6
-    beta[0, 6:10] = [1e-4, 3e-4, 2e-4, 1e-4]
-    beta[0, 10:13] = [3e-5, 1e-5, 2e-6]  # decaying tail
-    beta[0, 13:16] = [3e-6, 5e-6, 5e-6]  # a brighter aerosol layer above it
-    integral = np.cumsum(beta * 100.0, axis=1)  # saturated, yet signal goes on
-    assert not _liquid_tail(target, beta, integral, 0.03).any()
-    beta[0, 13:16] = [3e-6, 2e-6, 3e-6]  # only floor-level remnants above
-    integral = np.cumsum(beta * 100.0, axis=1)
-    tail = _liquid_tail(target, beta, integral, 0.03)
-    assert tail[0, 10:13].all() and not tail[0, 13:].any()
+    assert out[0, 6:14].all() and not out[0, 14:].any() and not out[0, :6].any()
+    thin = integral * 0.1  # the beam passes through: nothing added
+    out = _grow_spent_tails(
+        droplet, signal, blocked, height, ma.array(beta), thin, 0.03
+    )
+    assert (out == droplet).all()
 
 
 def test_find_attenuated_saturated_integral_marks_void():
@@ -544,10 +532,11 @@ def test_beam_saturation_is_median_of_liquid_tops():
     integral[:, 12:] = 0.02
     integral[:200, 15:] = rng.normal(0.03, 0.002, (200, 1))  # plateau at ~0.03
     integral[200:, 11] = 0.5  # non-liquid tops carry wild values: ignored
-    sat = _beam_saturation(target, integral, _H)
+    signal, liquid = target != Target.CLEAR, target == Target.DROPLET
+    sat = _beam_saturation(signal, liquid, integral, _H)
     assert sat is not None and abs(sat - 0.03) < 0.002
     # Too few liquid-topped profiles -> no estimate.
-    assert _beam_saturation(target[:150], integral[:150], _H) is None
+    assert _beam_saturation(signal[:150], liquid[:150], integral[:150], _H) is None
 
 
 def test_find_attenuated_empty_and_full_profiles():

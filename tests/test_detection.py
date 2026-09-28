@@ -323,7 +323,7 @@ def test_grow_liquid_follows_decaying_flank_only():
     grown = grow_liquid(
         droplet, signal, blocked, height, grow_up=50.0, grow_down=10.0, beta=beta
     )
-    # up: gates 4 and 5 (2e-5, 2.1e-5 within tolerance), not gate 6 (rises to 3e-5)
+    # up: gates 4 and 5 (2e-5, 2.1e-5 within the ratio), not gate 6 (rises to 3e-5)
     # down: gate 0 is only 1e-6, below 5 % of the 1e-4 peak
     assert grown.tolist() == [
         [False, True, True, True, True, True, False, False, False]
