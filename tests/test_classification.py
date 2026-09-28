@@ -15,6 +15,7 @@ from ceiloclass.classification import (
     _extend_ice_to_cloud_base,
     _find_attenuated,
     _flood_connected,
+    _liquid_tail,
     _melt_band_below_ice,
     _source_connected,
     _thin_runs,
@@ -471,29 +472,44 @@ def test_find_attenuated_bright_aerosol_top_stays_clear():
     assert not _find_attenuated(target, bright, _H).any()
 
 
-def test_find_attenuated_spent_liquid_tail_is_not_aerosol():
-    # Faint signal decaying above a liquid layer whose integral has reached
-    # saturation is the layer's dying tail: it joins the attenuated void. Above
-    # a thin layer the beam passes through (low integral) it stays aerosol, and
-    # a real aerosol layer (flat/rising beta) above the tail is kept either way.
+def test_liquid_tail_relabels_dying_signal_above_spent_layer():
+    # Signal falling steeply above a liquid layer whose integral has reached
+    # saturation, up to where the signal ends, is the layer's dying tail and
+    # becomes liquid whether it was classified as ice or aerosol.
+    target = _column(
+        (2, 6, Target.AEROSOL), (6, 10, Target.DROPLET), (10, 12, Target.ICE)
+    )
+    target[0, 12] = Target.AEROSOL
+    beta = np.zeros(target.shape)
+    beta[0, 2:6] = 1e-6
+    beta[0, 6:10] = [1e-4, 3e-4, 2e-4, 1e-4]
+    beta[0, 10:13] = [3e-5, 1e-5, 2e-6]  # decaying tail, then nothing
+    integral = np.cumsum(beta * 100.0, axis=1)  # saturated: 0.07 at the top
+    tail = _liquid_tail(target, integral, 0.03)
+    assert tail[0, 10:13].all() and not tail[0, 13:].any() and not tail[0, :10].any()
+    # A layer the beam passes through (low integral): nothing is relabelled.
+    assert not _liquid_tail(target, integral * 0.1, 0.03).any()
+
+
+def test_liquid_tail_keeps_layer_with_brighter_signal_above():
+    # A liquid layer inside a deeper column -- signal brighter than the tail's
+    # end continues above it -- has not demonstrably extinguished the beam: its
+    # surroundings are not turned into liquid. Floor-level remnants (within a
+    # factor of two of where the tail ended) do not veto it.
     target = _column(
         (2, 6, Target.AEROSOL), (6, 10, Target.DROPLET), (10, 16, Target.AEROSOL)
     )
-    bright = np.zeros_like(target, dtype=bool)
     beta = np.zeros(target.shape)
     beta[0, 2:6] = 1e-6
     beta[0, 6:10] = [1e-4, 3e-4, 2e-4, 1e-4]
     beta[0, 10:13] = [3e-5, 1e-5, 2e-6]  # decaying tail
-    beta[0, 13:16] = [2e-6, 2e-6, 2e-6]  # a flat aerosol layer above it
-    integral = np.cumsum(beta * 100.0, axis=1)  # saturated: 0.07 at the top
-    att = _find_attenuated(target, bright, _H, integral=integral, saturation=0.03)
-    assert att[0, 10:13].all()  # the tail
-    assert not att[0, 13:16].any() and not att[0, :10].any()  # aerosol kept
-    assert att[0, 16:].all()  # the void
-    thin = integral * 0.1  # a layer the beam passes through: nothing is marked
-    assert not _find_attenuated(
-        target, bright, _H, integral=thin, saturation=0.03
-    ).any()
+    beta[0, 13:16] = [3e-6, 5e-6, 5e-6]  # a brighter aerosol layer above it
+    integral = np.cumsum(beta * 100.0, axis=1)  # saturated, yet signal goes on
+    assert not _liquid_tail(target, integral, 0.03).any()
+    beta[0, 13:16] = [3e-6, 2e-6, 3e-6]  # only floor-level remnants above
+    integral = np.cumsum(beta * 100.0, axis=1)
+    tail = _liquid_tail(target, integral, 0.03)
+    assert tail[0, 10:13].all() and not tail[0, 13:].any()
 
 
 def test_find_attenuated_saturated_integral_marks_void():
