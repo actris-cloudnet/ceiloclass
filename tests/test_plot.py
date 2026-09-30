@@ -56,7 +56,7 @@ def test_depol_fill_values_under_the_mask_do_not_warn(tmp_path):
 
 
 def test_time_cells_without_gaps_are_plain_edges():
-    time = np.arange(5) * MINUTE
+    time = np.array([0, 1.2, 2, 3, 4.3]) * MINUTE
     edges, profile = _time_cells(time)
     np.testing.assert_allclose(edges, _edges(time))
     assert profile.tolist() == [0, 1, 2, 3, 4]

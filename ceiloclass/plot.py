@@ -225,8 +225,13 @@ def _time_cells(
         return edges, profile
     step = np.diff(time)
     half = float(np.median(step)) / 2
-    gaps = np.flatnonzero(step > max(_MAX_GAP, 3 * half))
-    edges[[0, -1]] = time[0] - half, time[-1] + half
+    is_gap = step > max(_MAX_GAP, 3 * half)
+    gaps = np.flatnonzero(is_gap)
+    # An outer cell mirrors its only step, which must not be a gap.
+    if is_gap[0]:
+        edges[0] = time[0] - half
+    if is_gap[-1]:
+        edges[-1] = time[-1] + half
     edges[gaps + 1] = time[gaps + 1] - half
     edges = np.insert(edges, gaps + 1, time[gaps] + half)
     return edges, np.insert(profile, gaps + 1, -1)
