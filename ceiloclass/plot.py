@@ -130,6 +130,8 @@ def plot_classification(
         if beta is not None:
             # Hide clear-air depol noise: only show where backscatter survived.
             masked = ma.masked_where(ma.getmaskarray(beta), masked)
+        # Matplotlib scales the hidden cells too, and their fill values overflow.
+        masked = ma.array(masked.filled(0), mask=ma.getmaskarray(masked))
         _plot_curtain(
             fig,
             ax,
