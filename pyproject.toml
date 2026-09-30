@@ -13,7 +13,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Atmospheric Science",
 ]
 # TODO: pin plain "ceilopyter" once the ceiloclass branch is released to PyPI.
-dependencies = ["atmoslib", "ceilopyter @ git+https://github.com/actris-cloudnet/ceilopyter.git@ceiloclass", "cloudnet-api-client", "matplotlib", "netCDF4", "numpy"]
+dependencies = ["atmoslib", "ceilopyter @ git+https://github.com/actris-cloudnet/ceilopyter.git@ceiloclass", "cloudnet-api-client", "matplotlib>=3.10", "netCDF4", "numpy"]
 description = "Cloud, aerosol and precipitation classification from ceilometer backscatter"
 dynamic = ["version"]
 name = "ceiloclass"

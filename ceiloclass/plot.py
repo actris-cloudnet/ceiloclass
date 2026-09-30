@@ -29,6 +29,9 @@ _LABELS: dict[Target, tuple[str, str]] = {
 # Figure width and curtain panel height (in), and the saved resolution.
 _WIDTH, _PANEL_HEIGHT, _DPI = 12.0, 3.6, 110
 
+# Longest time step (days) drawn as continuous data, as in Cloudnet figures.
+_MAX_GAP = 10 / 1440
+
 
 def plot_classification(
     classification: Classification,
@@ -69,19 +72,20 @@ def plot_classification(
     if depol is not None:
         depol = ma.asarray(depol)[:, keep]
     hist_beta = beta
-    x, y = _edges(time), _edges(rng_km)
+    x, rows = _time_cells(time)
+    y, cols = _edges(rng_km), np.arange(rng_km.size)
+    gaps = np.c_[x[:-1], x[1:]][rows < 0]
     if not show:
         # A saved figure shows at most a cell per pixel; a window keeps all to zoom.
-        cells = np.ix_(
-            _pixel_cells(x, round(_WIDTH * _DPI)),
-            _pixel_cells(y, round(_PANEL_HEIGHT * _DPI)),
-        )
-        target = target[cells]
-        if beta is not None:
-            beta = beta[cells]
-        if depol is not None:
-            depol = depol[cells]
+        rows = rows[_pixel_cells(x, round(_WIDTH * _DPI))]
+        cols = _pixel_cells(y, round(_PANEL_HEIGHT * _DPI))
         x, y = x[[0, -1]], y[[0, -1]]
+    if not show or len(gaps):
+        target = _take(target, rows, cols)
+        if beta is not None:
+            beta = _take(beta, rows, cols)
+        if depol is not None:
+            depol = _take(depol, rows, cols)
     cmap = ListedColormap([_LABELS[Target(i)][1] for i in range(len(Target))])
     norm = BoundaryNorm(np.arange(-0.5, len(Target) + 0.5, 1), cmap.N)
 
@@ -163,6 +167,9 @@ def plot_classification(
         [_LABELS[Target(i)][0] for i in range(len(Target))], fontsize=7
     )
 
+    for ax in axes:
+        _plot_gaps(ax, gaps)
+
     hist_ax = None
     if show_hist and hist_beta is not None:
         hist_ax = fig.add_subplot(gs[n_curtain, 0])
@@ -193,6 +200,37 @@ def _edges(centers: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
     return np.r_[2 * c[0] - mid[0], mid, 2 * c[-1] - mid[-1]]
 
 
+def _time_cells(
+    time: npt.NDArray[np.floating],
+) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.intp]]:
+    """Time cell edges and each cell's profile index, -1 for an empty gap cell.
+
+    A step longer than `_MAX_GAP` (and than the usual step) is a data gap:
+    rather than stretching the profiles either side across it, they keep the
+    usual width and an empty cell fills the gap.
+    """
+    edges = _edges(time)
+    profile = np.arange(time.size)
+    if time.size < 2:
+        return edges, profile
+    step = np.diff(time)
+    half = float(np.median(step)) / 2
+    gaps = np.flatnonzero(step > max(_MAX_GAP, 3 * half))
+    edges[[0, -1]] = time[0] - half, time[-1] + half
+    edges[gaps + 1] = time[gaps + 1] - half
+    edges = np.insert(edges, gaps + 1, time[gaps] + half)
+    return edges, np.insert(profile, gaps + 1, -1)
+
+
+def _take(
+    data: npt.NDArray[Any], rows: npt.NDArray[np.intp], cols: npt.NDArray[np.intp]
+) -> ma.MaskedArray:
+    """`data` at the given profiles and gates, masked where the profile is a gap."""
+    out = ma.array(data[np.ix_(rows, cols)])
+    out[rows < 0] = ma.masked
+    return out
+
+
 def _pixel_cells(edges: npt.NDArray[np.floating], n: int) -> npt.NDArray[np.intp]:
     """Index of the cell under each of `n` even pixel centers spanning `edges`."""
     centers = np.linspace(edges[0], edges[-1], 2 * n + 1)[1::2]
@@ -221,6 +259,20 @@ def _plot_curtain(
     ax.set_title(title)
     ax.set_ylabel("Range (km)")
     fig.colorbar(mesh, ax=ax, label=cbar_label, pad=0.01)
+
+
+def _plot_gaps(ax: Any, gaps: npt.NDArray[np.floating]) -> None:
+    """Hatch the time spans without data, as Cloudnet figures do."""
+    for start, end in gaps:
+        ax.axvspan(
+            start,
+            end,
+            hatch="//",
+            facecolor="whitesmoke",
+            edgecolor="lightgrey",
+            linewidth=0.5,
+            hatch_linewidth=0.5,
+        )
 
 
 def _plot_beta_hist(
