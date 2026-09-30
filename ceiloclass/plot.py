@@ -71,21 +71,22 @@ def plot_classification(
         beta = ma.asarray(beta)[:, keep]
     if depol is not None:
         depol = ma.asarray(depol)[:, keep]
-    hist_beta = beta
-    x, rows = _time_cells(time)
-    y, cols = _edges(rng_km), np.arange(rng_km.size)
-    gaps = np.c_[x[:-1], x[1:]][rows < 0]
-    if not show:
-        # A saved figure shows at most a cell per pixel; a window keeps all to zoom.
-        rows = rows[_pixel_cells(x, round(_WIDTH * _DPI))]
-        cols = _pixel_cells(y, round(_PANEL_HEIGHT * _DPI))
-        x, y = x[[0, -1]], y[[0, -1]]
-    if not show or len(gaps):
-        target = _take(target, rows, cols)
-        if beta is not None:
-            beta = _take(beta, rows, cols)
-        if depol is not None:
-            depol = _take(depol, rows, cols)
+    x, profiles = _time_cells(time)
+    y = _edges(rng_km)
+    gaps = np.c_[x[:-1], x[1:]][profiles < 0]
+
+    def thin(
+        xlim: tuple[float, float], ylim: tuple[float, float], width: int, height: int
+    ) -> dict[str, ma.MaskedArray]:
+        rows = profiles[_pixel_cells(x, *xlim, width)]
+        return _curtains(target, beta, depol, rows, _pixel_cells(y, *ylim, height))
+
+    # Draw only the cell under each pixel: more can't show and costs seconds.
+    extent = (x[0], x[-1], y[0], y[-1])
+    data = thin(
+        extent[:2], extent[2:], round(_WIDTH * _DPI), round(_PANEL_HEIGHT * _DPI)
+    )
+    images = {}
     cmap = ListedColormap([_LABELS[Target(i)][1] for i in range(len(Target))])
     norm = BoundaryNorm(np.arange(-0.5, len(Target) + 0.5, 1), cmap.N)
 
@@ -111,15 +112,11 @@ def plot_classification(
     if beta is not None:
         ax = axes[panel]
         panel += 1
-        # Junk screen mirrors classify: unmasked fill values would otherwise
-        # paint over-range streaks and stretch the histogram by many decades.
-        beta = ma.masked_less_equal(ma.masked_greater(beta, MAX_PHYSICAL_BETA), 0)
-        _plot_curtain(
+        images["beta"] = _plot_curtain(
             fig,
             ax,
-            x,
-            y,
-            beta,
+            extent,
+            data["beta"],
             title="Screened backscatter",
             cbar_label="beta (sr⁻¹ m⁻¹)",
             norm=LogNorm(1e-7, 1e-4),
@@ -130,18 +127,11 @@ def plot_classification(
     if depol is not None:
         ax = axes[panel]
         panel += 1
-        masked = ma.masked_invalid(ma.array(depol))
-        if beta is not None:
-            # Hide clear-air depol noise: only show where backscatter survived.
-            masked = ma.masked_where(ma.getmaskarray(beta), masked)
-        # Matplotlib scales the hidden cells too, and their fill values overflow.
-        masked = ma.array(masked.filled(0), mask=ma.getmaskarray(masked))
-        _plot_curtain(
+        images["depol"] = _plot_curtain(
             fig,
             ax,
-            x,
-            y,
-            masked,
+            extent,
+            data["depol"],
             title="Depolarization ratio",
             cbar_label="depolarization",
             vmin=0,
@@ -151,7 +141,9 @@ def plot_classification(
         _plot_t0(ax, time, t0_km, hide_t0)
 
     ax = axes[-1]
-    mesh = ax.pcolorfast(x, y, target.T, cmap=cmap, norm=norm)
+    mesh = images["target"] = ax.pcolorfast(
+        extent[:2], extent[2:], data["target"].T, cmap=cmap, norm=norm
+    )
     _plot_t0(ax, time, t0_km, hide_t0)
     ax.set_title("Target classification")
     ax.set_ylabel("Range (km)")
@@ -161,6 +153,8 @@ def plot_classification(
     # since the numeric pcolorfast coordinates don't install date units.
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    # Fixed limits, so that re-thinning the images never rescales the axes.
+    ax.set_xlim(extent[:2])
     ax.set_ylim(0, min(max_height / 1000, rng_km.max()))
     cbar = fig.colorbar(mesh, ax=ax, ticks=range(len(Target)), pad=0.01)
     cbar.ax.set_yticklabels(
@@ -171,9 +165,9 @@ def plot_classification(
         _plot_gaps(ax, gaps)
 
     hist_ax = None
-    if show_hist and hist_beta is not None:
+    if show_hist and beta is not None:
         hist_ax = fig.add_subplot(gs[n_curtain, 0])
-        _plot_beta_hist(hist_ax, hist_beta, classification.strong_beta)
+        _plot_beta_hist(hist_ax, beta, classification.strong_beta)
 
     fig.tight_layout()
     # tight_layout leaves a placeholder engine that makes savefig draw twice.
@@ -187,6 +181,22 @@ def plot_classification(
     if path is not None:
         fig.savefig(path, dpi=_DPI)
     if show:
+
+        def rethin(_event: object = None) -> None:
+            """Thin again to the visible part, so zooming in shows every cell."""
+            xlim = max(ax0.get_xlim()[0], x[0]), min(ax0.get_xlim()[1], x[-1])
+            ylim = max(ax0.get_ylim()[0], y[0]), min(ax0.get_ylim()[1], y[-1])
+            if xlim[0] >= xlim[1] or ylim[0] >= ylim[1]:
+                return
+            size = max(round(ax0.bbox.width), 1), max(round(ax0.bbox.height), 1)
+            for name, array in thin(xlim, ylim, *size).items():
+                images[name].set_data(array.T)
+                images[name].set_extent((*xlim, *ylim))
+            fig.canvas.draw_idle()
+
+        ax0.callbacks.connect("xlim_changed", rethin)
+        ax0.callbacks.connect("ylim_changed", rethin)
+        fig.canvas.mpl_connect("resize_event", rethin)
         plt.show()
     plt.close(fig)
 
@@ -231,34 +241,59 @@ def _take(
     return out
 
 
-def _pixel_cells(edges: npt.NDArray[np.floating], n: int) -> npt.NDArray[np.intp]:
-    """Index of the cell under each of `n` even pixel centers spanning `edges`."""
-    centers = np.linspace(edges[0], edges[-1], 2 * n + 1)[1::2]
+def _curtains(
+    target: npt.NDArray[np.integer],
+    beta: ma.MaskedArray | None,
+    depol: ma.MaskedArray | None,
+    rows: npt.NDArray[np.intp],
+    cols: npt.NDArray[np.intp],
+) -> dict[str, ma.MaskedArray]:
+    """The curtain panels' data at the given profiles and gates, as displayed."""
+    data = {"target": _take(target, rows, cols)}
+    if beta is not None:
+        # Junk screen mirrors classify: unmasked fill values would otherwise
+        # paint over-range streaks.
+        beta = ma.masked_greater(_take(beta, rows, cols), MAX_PHYSICAL_BETA)
+        data["beta"] = ma.masked_less_equal(beta, 0)
+    if depol is not None:
+        depol = ma.masked_invalid(_take(depol, rows, cols))
+        if beta is not None:
+            # Hide clear-air depol noise: only show where backscatter survived.
+            depol = ma.masked_where(ma.getmaskarray(data["beta"]), depol)
+        # Matplotlib scales the hidden cells too, and their fill values overflow.
+        data["depol"] = ma.array(depol.filled(0), mask=ma.getmaskarray(depol))
+    return data
+
+
+def _pixel_cells(
+    edges: npt.NDArray[np.floating], lo: float, hi: float, n: int
+) -> npt.NDArray[np.intp]:
+    """Index of the cell under each of `n` even pixel centers from `lo` to `hi`."""
+    centers = np.linspace(lo, hi, 2 * n + 1)[1::2]
     return np.clip(np.searchsorted(edges, centers) - 1, 0, edges.size - 2)
 
 
 def _plot_curtain(
     fig: Any,
     ax: Any,
-    x: npt.NDArray[np.floating],
-    y: npt.NDArray[np.floating],
+    extent: tuple[float, float, float, float],
     data: ma.MaskedArray,
     *,
     title: str,
     cbar_label: str,
     **mesh_kwargs: Any,
-) -> None:
+) -> Any:
     """Draw one time-range curtain panel with its title, y-label and colorbar.
 
     Uses `pcolorfast` (image-based, an order of magnitude faster to draw than
-    `pcolormesh`'s per-cell quads on a full-day curtain); `x` and `y` are
-    either explicit cell edges, which keep it exact on a jittery time grid, or
-    the two outer bounds of an even grid.
+    `pcolormesh`'s per-cell quads on a full-day curtain) on the even pixel grid
+    that `data` was thinned to, and returns the image.
     """
-    mesh = ax.pcolorfast(x, y, data.T, **mesh_kwargs)
+    mesh = ax.pcolorfast(extent[:2], extent[2:], data.T, **mesh_kwargs)
     ax.set_title(title)
     ax.set_ylabel("Range (km)")
     fig.colorbar(mesh, ax=ax, label=cbar_label, pad=0.01)
+    return mesh
 
 
 def _plot_gaps(ax: Any, gaps: npt.NDArray[np.floating]) -> None:
