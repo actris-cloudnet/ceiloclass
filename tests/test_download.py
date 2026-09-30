@@ -1,6 +1,8 @@
 """Tests for instrument discovery and selection (no network)."""
 
+import argparse
 import builtins
+import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -147,3 +149,45 @@ def test_select_many_interactive_prompts(monkeypatch):
     answers = iter(["0", "nope", "2"])  # invalid, invalid, then valid
     monkeypatch.setattr(builtins, "input", lambda _prompt="": next(answers))
     assert cli._select_source(sources, _Parser()).reader == "cl61"
+
+
+# --- default date -----------------------------------------------------------
+
+
+def test_date_defaults_to_today_when_fetching():
+    args = argparse.Namespace(site="kenttarova", date=None, files=[])
+    cli._default_date(args)
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    assert datetime.date.fromisoformat(args.date) in (
+        today,
+        today - datetime.timedelta(days=1),  # the day rolled over mid-test
+    )
+
+
+def test_date_is_not_guessed_for_local_files_or_when_given():
+    args = argparse.Namespace(site="kenttarova", date=None, files=["ceilo.nc"])
+    cli._default_date(args)
+    assert args.date is None
+    args = argparse.Namespace(site="kenttarova", date="2025-05-25", files=[])
+    cli._default_date(args)
+    assert args.date == "2025-05-25"
+
+
+# --- cache ------------------------------------------------------------------
+
+
+def test_download_refetches_files_whose_size_changed(tmp_path):
+    (tmp_path / "same.nc").write_bytes(b"1234")
+    (tmp_path / "grown.nc").write_bytes(b"1234")
+    metadata = [
+        SimpleNamespace(filename="same.nc", size=4),
+        SimpleNamespace(filename="grown.nc", size=9),
+        SimpleNamespace(filename="new.nc", size=2),
+    ]
+    fetched = []
+    client = SimpleNamespace(
+        download=lambda metas, output_directory: fetched.extend(metas)
+    )
+    paths = download._download_missing(client, metadata, tmp_path)
+    assert [m.filename for m in fetched] == ["grown.nc", "new.nc"]
+    assert [p.name for p in paths] == ["same.nc", "grown.nc", "new.nc"]

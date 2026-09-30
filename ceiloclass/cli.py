@@ -1,6 +1,7 @@
 """Command-line interface for ceiloclass."""
 
 import argparse
+import datetime
 import logging
 import sys
 from collections.abc import Callable, Sequence
@@ -111,7 +112,10 @@ def _add_arguments(p: argparse.ArgumentParser) -> None:
         "-s", "--site", help="Cloudnet site id (to fetch raw files and/or model)"
     )
     p.add_argument(
-        "-d", "--date", help="Date YYYY-MM-DD (to fetch raw files and/or model)"
+        "-d",
+        "--date",
+        help="Date YYYY-MM-DD (to fetch raw files and/or model); defaults to today "
+        "(UTC) when the data files are fetched",
     )
     p.add_argument(
         "--download-dir",
@@ -145,6 +149,13 @@ def _add_arguments(p: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Omit the diagnostic backscatter histogram panel from plots",
     )
+
+
+def _default_date(args: argparse.Namespace) -> None:
+    """Default --date to today (UTC, as Cloudnet days are) when fetching data."""
+    if args.site and not args.date and not args.files:
+        args.date = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+        logging.info("No --date given, using today (%s UTC)", args.date)
 
 
 def _select_source(
@@ -232,12 +243,13 @@ def _resolve_input(
         if source.reader is not None:
             return READERS[source.reader], files, instrument_id
         parser.error(f"no raw reader for instrument: {source.label}")
-    parser.error("provide data files, or both --site and --date to fetch them")
+    parser.error("provide data files, or --site (and --date) to fetch them")
 
 
 def _run_classify(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     if args.no_rescreen and not args.harmonized:
         parser.error("--no-rescreen only applies to --harmonized input")
+    _default_date(args)
     reader, files, instrument_id = _resolve_input(args, parser)
     # `rescreen` only exists on the harmonized reader; raw readers don't take it.
     read_kwargs = {"rescreen": not args.no_rescreen} if args.harmonized else {}

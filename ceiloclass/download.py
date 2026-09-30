@@ -278,7 +278,8 @@ def _download_missing(
     out = Path(output_directory)
     out.mkdir(parents=True, exist_ok=True)
     metadata = list(metadata)
-    missing = [m for m in metadata if not (out / m.filename).exists()]
+    # Size check: the current day's files keep growing on the portal.
+    missing = [m for m in metadata if not _is_cached(out / m.filename, m.size)]
     where = out.resolve()
     if missing:
         logging.info("Downloading %s to %s", _describe(missing), where)
@@ -286,6 +287,10 @@ def _download_missing(
     else:
         logging.info("Found %s already in %s", _describe(metadata), where)
     return [out / m.filename for m in metadata]
+
+
+def _is_cached(path: Path, size: int) -> bool:
+    return path.exists() and path.stat().st_size == size
 
 
 def _describe(metadata: list) -> str:

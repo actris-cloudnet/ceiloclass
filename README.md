@@ -28,6 +28,12 @@ discovered automatically; if a site has several, you are prompted to pick one):
 ceiloclass -s munich -d 2025-05-25 --show
 ```
 
+Leave out `-d` to classify the current day (UTC) so far:
+
+```sh
+ceiloclass -s kenttarova --show
+```
+
 Add `--harmonized` to use the Cloudnet harmonized lidar product instead of raw
 data, `-i` to narrow to a particular instrument, or pass local files directly:
 
@@ -72,7 +78,7 @@ ceiloclass -s kenttarova -d 2023-09-04 -a 30 --harmonized -i cl61 -m harmonie-fm
 | `--no-surface-liquid`  | Do not detect fog / low stratus from the lowest range gates. Use when the instrument's near-surface overlap correction is unreliable and produces spurious surface liquid layers.                                                                                       |
 | `-m`, `--model`        | Cloudnet model netCDF file, or a model id to fetch (e.g. `ecmwf`, `harmonie-fmi-6-11`) when using `--site`/`--date`.                                                                                                                                                    |
 | `-s`, `--site`         | Cloudnet site id (to fetch raw files and/or model), e.g. `munich`.                                                                                                                                                                                                      |
-| `-d`, `--date`         | Date `YYYY-MM-DD` (to fetch raw files and/or model).                                                                                                                                                                                                                    |
+| `-d`, `--date`         | Date `YYYY-MM-DD` (to fetch raw files and/or model). Defaults to today (UTC) when the data files are fetched.                                                                                                                                                           |
 | `--download-dir`       | Directory for fetched files (default: the package `data/` directory).                                                                                                                                                                                                   |
 | `--calibration-factor` | Override the backscatter calibration factor.                                                                                                                                                                                                                            |
 | `-a`, `--average`      | Average into time bins of this width (seconds) before classifying (faster).                                                                                                                                                                                             |
