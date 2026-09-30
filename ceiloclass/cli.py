@@ -86,7 +86,7 @@ def _add_arguments(p: argparse.ArgumentParser) -> None:
         "--harmonized",
         action="store_true",
         help="Use a Cloudnet harmonized backscatter product (ceilometers, PollyXT, "
-        "doppler-lidars) instead of raw instrument data",
+        "DIAL, doppler-lidars) instead of raw instrument data",
     )
     p.add_argument(
         "--no-rescreen",

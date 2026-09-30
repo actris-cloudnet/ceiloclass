@@ -99,7 +99,9 @@ classification, restricted to the parts that work without radar:
   a warm **liquid droplet** layer otherwise.
 - **Strong, non-liquid signal** is cloud or precipitation: **ice** in the
   sub-freezing air above the 0 °C level, **drizzle/rain** in the warm air below
-  it. The backscatter threshold separating this from weaker signal is picked per
+  it. Precipitation falls from a cloud, so drizzle/rain is kept only where it
+  connects to a liquid layer or ice above, or where the column is too deep to
+  be aerosol; other bright warm signal stays aerosol. The backscatter threshold separating this from weaker signal is picked per
   file from the backscatter histogram, so it adapts to each site/day's aerosol
   load.
 - Remaining signal is **aerosol**; gates with no signal are **clear** — except
