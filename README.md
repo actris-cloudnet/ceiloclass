@@ -91,7 +91,8 @@ ceiloclass -s kenttarova -d 2023-09-04 -a 30 --harmonized -i cl61 -m harmonie-fm
 ## How it works
 
 Each time–range pixel is classified from attenuated backscatter and model
-temperature alone. The method follows CloudnetPy's target
+temperature alone. The method follows
+[CloudnetPy](https://github.com/actris-cloudnet/cloudnetpy)'s target
 classification, restricted to the parts that work without radar:
 
 - **Liquid layers** are detected as sharp backscatter peaks. A layer is
