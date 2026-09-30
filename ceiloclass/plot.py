@@ -26,6 +26,9 @@ _LABELS: dict[Target, tuple[str, str]] = {
     Target.ATTENUATED: ("Beam attenuated", "#ededed"),
 }
 
+# Figure width and curtain panel height (in), and the saved resolution.
+_WIDTH, _PANEL_HEIGHT, _DPI = 12.0, 3.6, 110
+
 
 def plot_classification(
     classification: Classification,
@@ -56,22 +59,38 @@ def plot_classification(
     # Matplotlib date numbers: pcolorfast needs numeric coordinates, and the
     # t0 line uses the same units so everything stays aligned.
     time = mdates.date2num(classification.time)
-    # Only render up to the displayed height — plotting all gates (CL61 reaches
-    # ~15 km) is the main cost even when viewing the lowest few km.
-    keep = np.asarray(classification.range) <= max_height * 1.05
-    rng_km = np.asarray(classification.range)[keep] / 1000
+    # Only render up to the displayed height; range ascends, so slice (no copy).
+    rng = np.asarray(classification.range)
+    keep = slice(int(np.searchsorted(rng, max_height * 1.05, side="right")))
+    rng_km = rng[keep] / 1000
     target = classification.target[:, keep]
     if beta is not None:
         beta = ma.asarray(beta)[:, keep]
     if depol is not None:
         depol = ma.asarray(depol)[:, keep]
+    hist_beta = beta
+    x, y = _edges(time), _edges(rng_km)
+    if not show:
+        # A saved figure shows at most a cell per pixel; a window keeps all to zoom.
+        cells = np.ix_(
+            _pixel_cells(x, round(_WIDTH * _DPI)),
+            _pixel_cells(y, round(_PANEL_HEIGHT * _DPI)),
+        )
+        target = target[cells]
+        if beta is not None:
+            beta = beta[cells]
+        if depol is not None:
+            depol = depol[cells]
+        x, y = x[[0, -1]], y[[0, -1]]
     cmap = ListedColormap([_LABELS[Target(i)][1] for i in range(len(Target))])
     norm = BoundaryNorm(np.arange(-0.5, len(Target) + 0.5, 1), cmap.N)
 
     n_curtain = 1 + (beta is not None) + (depol is not None)
     show_hist = beta is not None and histogram
     n_rows = n_curtain + int(show_hist)
-    fig = plt.figure(figsize=(12, 3.6 * n_curtain + (3.0 if show_hist else 0.0)))
+    fig = plt.figure(
+        figsize=(_WIDTH, _PANEL_HEIGHT * n_curtain + (3.0 if show_hist else 0.0))
+    )
     gs = fig.add_gridspec(n_rows, 1)
     # Curtains share time and range; the histogram panel (if any) is independent.
     ax0 = fig.add_subplot(gs[0, 0])
@@ -90,13 +109,13 @@ def plot_classification(
         panel += 1
         # Junk screen mirrors classify: unmasked fill values would otherwise
         # paint over-range streaks and stretch the histogram by many decades.
-        masked = ma.masked_less_equal(ma.masked_greater(beta, MAX_PHYSICAL_BETA), 0)
+        beta = ma.masked_less_equal(ma.masked_greater(beta, MAX_PHYSICAL_BETA), 0)
         _plot_curtain(
             fig,
             ax,
-            time,
-            rng_km,
-            masked,
+            x,
+            y,
+            beta,
             title="Screened backscatter",
             cbar_label="beta (sr⁻¹ m⁻¹)",
             norm=LogNorm(1e-7, 1e-4),
@@ -110,15 +129,12 @@ def plot_classification(
         masked = ma.masked_invalid(ma.array(depol))
         if beta is not None:
             # Hide clear-air depol noise: only show where backscatter survived.
-            bad = ma.getmaskarray(
-                ma.masked_less_equal(ma.masked_greater(beta, MAX_PHYSICAL_BETA), 0)
-            )
-            masked = ma.masked_where(bad, masked)
+            masked = ma.masked_where(ma.getmaskarray(beta), masked)
         _plot_curtain(
             fig,
             ax,
-            time,
-            rng_km,
+            x,
+            y,
             masked,
             title="Depolarization ratio",
             cbar_label="depolarization",
@@ -129,7 +145,7 @@ def plot_classification(
         _plot_t0(ax, time, t0_km, hide_t0)
 
     ax = axes[-1]
-    mesh = ax.pcolorfast(_edges(time), _edges(rng_km), target.T, cmap=cmap, norm=norm)
+    mesh = ax.pcolorfast(x, y, target.T, cmap=cmap, norm=norm)
     _plot_t0(ax, time, t0_km, hide_t0)
     ax.set_title("Target classification")
     ax.set_ylabel("Range (km)")
@@ -146,11 +162,13 @@ def plot_classification(
     )
 
     hist_ax = None
-    if show_hist and beta is not None:
+    if show_hist and hist_beta is not None:
         hist_ax = fig.add_subplot(gs[n_curtain, 0])
-        _plot_beta_hist(hist_ax, beta, classification.strong_beta)
+        _plot_beta_hist(hist_ax, hist_beta, classification.strong_beta)
 
     fig.tight_layout()
+    # tight_layout leaves a placeholder engine that makes savefig draw twice.
+    fig.set_layout_engine(None)
     if hist_ax is not None:
         # The curtain panels are narrowed by their colorbars; match the histogram
         # to a curtain's horizontal extent so all panels line up.
@@ -158,7 +176,7 @@ def plot_classification(
         pos = hist_ax.get_position()
         hist_ax.set_position((ref.x0, pos.y0, ref.width, pos.height))
     if path is not None:
-        fig.savefig(path, dpi=110)
+        fig.savefig(path, dpi=_DPI)
     if show:
         plt.show()
     plt.close(fig)
@@ -173,11 +191,17 @@ def _edges(centers: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
     return np.r_[2 * c[0] - mid[0], mid, 2 * c[-1] - mid[-1]]
 
 
+def _pixel_cells(edges: npt.NDArray[np.floating], n: int) -> npt.NDArray[np.intp]:
+    """Index of the cell under each of `n` even pixel centers spanning `edges`."""
+    centers = np.linspace(edges[0], edges[-1], 2 * n + 1)[1::2]
+    return np.clip(np.searchsorted(edges, centers) - 1, 0, edges.size - 2)
+
+
 def _plot_curtain(
     fig: Any,
     ax: Any,
-    time: npt.NDArray[np.floating],
-    rng_km: npt.NDArray[np.floating],
+    x: npt.NDArray[np.floating],
+    y: npt.NDArray[np.floating],
     data: ma.MaskedArray,
     *,
     title: str,
@@ -187,10 +211,11 @@ def _plot_curtain(
     """Draw one time-range curtain panel with its title, y-label and colorbar.
 
     Uses `pcolorfast` (image-based, an order of magnitude faster to draw than
-    `pcolormesh`'s per-cell quads on a full-day curtain); explicit cell edges
-    keep it exact on a jittery time grid.
+    `pcolormesh`'s per-cell quads on a full-day curtain); `x` and `y` are
+    either explicit cell edges, which keep it exact on a jittery time grid, or
+    the two outer bounds of an even grid.
     """
-    mesh = ax.pcolorfast(_edges(time), _edges(rng_km), data.T, **mesh_kwargs)
+    mesh = ax.pcolorfast(x, y, data.T, **mesh_kwargs)
     ax.set_title(title)
     ax.set_ylabel("Range (km)")
     fig.colorbar(mesh, ax=ax, label=cbar_label, pad=0.01)
